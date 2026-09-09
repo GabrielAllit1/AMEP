@@ -1,0 +1,11 @@
+AMEP-1 production-oriented hardening validation
+===============================================
+Command: PYTHONPATH=src pytest -q
+Result: 21 passed
+
+Command: python -m compileall -q src tests
+Result: PASS
+
+Scope: software/unit/integration verification only. This does not constitute
+recorded maritime, HIL, target-hardware, controlled-water, certification, or
+production-readiness evidence.

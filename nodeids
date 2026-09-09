@@ -1,0 +1,23 @@
+[
+  "tests/test_estimator.py::test_covariance_remains_symmetric_psd",
+  "tests/test_estimator.py::test_current_prior_is_supported",
+  "tests/test_estimator.py::test_gross_outlier_is_rejected",
+  "tests/test_estimator.py::test_ground_velocity_observes_water_plus_current",
+  "tests/test_estimator.py::test_heading_jacobian_matches_finite_difference",
+  "tests/test_estimator.py::test_heading_residual_wraps",
+  "tests/test_estimator.py::test_large_prediction_gap_fails_closed",
+  "tests/test_estimator.py::test_nonmonotonic_time_fails_closed",
+  "tests/test_estimator.py::test_position_update_reduces_position_covariance",
+  "tests/test_estimator.py::test_predict_preserves_published_water_current_decomposition",
+  "tests/test_estimator.py::test_raw_specific_force_contract_fails_closed",
+  "tests/test_operations.py::test_comms_priority_and_failover",
+  "tests/test_operations.py::test_reference_profile_has_published_generic_sources",
+  "tests/test_operations.py::test_runtime_prediction_fault_latches_safe_hold",
+  "tests/test_operations.py::test_watchdog_detects_deadline_and_nonmonotonic_time",
+  "tests/test_supervision.py::test_degraded_mode_is_reachable_from_real_rank",
+  "tests/test_supervision.py::test_gnss_full_rank_nominal_and_non_gnss_full_rank_resilient",
+  "tests/test_supervision.py::test_health_freshness_transitions_to_stale",
+  "tests/test_supervision.py::test_health_isolation_and_recovery_probe_path",
+  "tests/test_supervision.py::test_runtime_isolated_source_is_probe_only_until_recovered",
+  "tests/test_supervision.py::test_safe_hold_when_rank_below_three"
+]
