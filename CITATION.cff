@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use AMEP-1 in research, please cite the Version 1.0 technical report."
+title: "Adaptive Maritime Estimation and PNT (AMEP-1): A Falsifiable Resilient Multisensor Navigation and Autonomy-Authority Architecture for GNSS-Degraded USV Operation"
+type: software
+authors:
+  - family-names: Allit
+    given-names: Gabriel V.
+    orcid: "https://orcid.org/0009-0008-2365-226X"
+version: "0.2.0"
+date-released: 2026-09-10
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.22561851"
+    description: "AMEP-1 Version 1.0 research report"
+repository-code: "https://github.com/GabrielAllit1/AMEP"
+keywords:
+  - resilient PNT
+  - GNSS denial
+  - maritime autonomy
+  - USV
+  - extended Kalman filter
+  - multisensor fusion
+  - sensor integrity
+  - navigation authority
+abstract: >-
+  AMEP-1 is an EKF-centered research architecture for resilient maritime
+  navigation and autonomy-authority supervision under GNSS-degraded and
+  GNSS-denied conditions. This software remains a research/SIL prototype and
+  does not constitute certified or field-validated navigation software.
