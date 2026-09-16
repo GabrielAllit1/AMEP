@@ -32,13 +32,15 @@ class EstimatorSnapshot:
 
 @runtime_checkable
 class EstimatorBackend(Protocol):
-    """State-dimension- and frame-aware real-time estimator contract.
-
-    Measurements cross the boundary as semantic kinds, values, covariance and
-    frame. Each estimator owns its internal state layout and observation models.
-    """
+    """State-dimension- and frame-aware real-time estimator contract."""
 
     last_t: float | None
+
+    @property
+    def measurement_kinds(self) -> tuple[str, ...]: ...
+
+    @property
+    def accepted_frames(self) -> tuple[str, ...]: ...
 
     def predict(self, prediction_input: object) -> float: ...
 
