@@ -1,5 +1,5 @@
 from .authority import NavigationPolicy, NavigationSupervisor
-from .backend import DelayedMeasurementBackend, EstimatorBackend
+from .backend import DelayedMeasurementBackend, EstimatorBackend, EstimatorSnapshot
 from .comms import CommunicationsSupervisor, LinkPolicy
 from .config import EstimatorConfig, ProcessNoiseConfig, RuntimePolicy, SourcePolicy
 from .consistency import (
@@ -54,6 +54,7 @@ __all__ = [
     "DeterministicReplay",
     "EstimatorBackend",
     "EstimatorConfig",
+    "EstimatorSnapshot",
     "EvidenceLog",
     "EvidenceRecord",
     "EvidenceVerification",
