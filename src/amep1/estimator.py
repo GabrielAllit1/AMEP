@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Mapping
 
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
@@ -23,7 +24,7 @@ class AMEPFilter:
     State: [E, N, Vw_E, Vw_N, C_E, C_N, psi]^T
 
     This remains a horizontal maritime research estimator; it is not a full
-    strap-down INS. Runtime orchestration consumes its semantic backend methods
+    strap-down INS. Runtime orchestration consumes semantic backend methods
     rather than depending on this internal state layout.
     """
 
@@ -82,8 +83,6 @@ class AMEPFilter:
             dtype=float,
         )
 
-        # Full Jacobian for the published 2-D acceleration rotation.
-        # da_E/dpsi = a_N; da_N/dpsi = -a_E.
         F = np.eye(7, dtype=float)
         F[0, 2] = dt
         F[0, 4] = dt
@@ -209,10 +208,15 @@ class AMEPFilter:
         values: np.ndarray,
         covariance: np.ndarray,
         *,
+        frame: str,
         source: str,
+        metadata: Mapping[str, object] | None = None,
         allow_fusion: bool = True,
     ) -> MeasurementResult:
         """Apply one semantic measurement without exposing the 7-state layout."""
+        del metadata  # Reserved for future AMEP measurement-model extensions.
+        if frame != "local_ENU":
+            raise ValueError(f"AMEPFilter requires local_ENU measurements, got {frame}")
         models: dict[
             str,
             tuple[int, tuple[int, ...], tuple[tuple[int, int, float], ...]],
@@ -251,31 +255,31 @@ class AMEPFilter:
     def update_position(self, E: float, N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
         return self.update_measurement(
             "position", np.array([E, N]), np.eye(2) * float(sigma) ** 2,
-            source=source, allow_fusion=allow_fusion,
+            frame="local_ENU", source=source, allow_fusion=allow_fusion,
         )
 
     def update_water_velocity(self, Vw_E: float, Vw_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
         return self.update_measurement(
             "water_velocity", np.array([Vw_E, Vw_N]), np.eye(2) * float(sigma) ** 2,
-            source=source, allow_fusion=allow_fusion,
+            frame="local_ENU", source=source, allow_fusion=allow_fusion,
         )
 
     def update_ground_velocity(self, Vg_E: float, Vg_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
         return self.update_measurement(
             "ground_velocity", np.array([Vg_E, Vg_N]), np.eye(2) * float(sigma) ** 2,
-            source=source, allow_fusion=allow_fusion,
+            frame="local_ENU", source=source, allow_fusion=allow_fusion,
         )
 
     def update_current_prior(self, C_E: float, C_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
         return self.update_measurement(
             "current_prior", np.array([C_E, C_N]), np.eye(2) * float(sigma) ** 2,
-            source=source, allow_fusion=allow_fusion,
+            frame="local_ENU", source=source, allow_fusion=allow_fusion,
         )
 
     def update_heading(self, psi: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
         return self.update_measurement(
             "heading", np.array([psi]), np.array([[float(sigma) ** 2]]),
-            source=source, allow_fusion=allow_fusion,
+            frame="local_ENU", source=source, allow_fusion=allow_fusion,
         )
 
     @property
@@ -293,6 +297,7 @@ class AMEPFilter:
     def snapshot(self) -> EstimatorSnapshot:
         vg_e, vg_n = self.ground_velocity
         return EstimatorSnapshot(
+            frame="local_ENU",
             east_m=float(self.x[0]),
             north_m=float(self.x[1]),
             ground_velocity_e_mps=vg_e,
