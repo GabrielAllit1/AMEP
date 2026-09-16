@@ -74,3 +74,17 @@ def build_reference_source_registry() -> SourceRegistry:
     for descriptor in descriptors:
         registry.register(descriptor)
     return registry
+
+
+def build_reference_runtime():
+    """Construct the reference runtime with health, coverage, and dependency metadata."""
+    from .estimator import AMEPFilter
+    from .runtime import AMEPRuntime
+
+    health, coverage = build_reference_health_and_constraints()
+    return AMEPRuntime(
+        AMEPFilter(),
+        health,
+        coverage,
+        source_registry=build_reference_source_registry(),
+    )
