@@ -21,15 +21,15 @@ class IntegrityStatus(str, Enum):
 @dataclass(frozen=True)
 class IntegrityPolicy:
     minimum_navigation_rank: int = 3
-    minimum_resilient_non_gnss_absolute_domains: int = 2
+    minimum_resilient_non_gnss_absolute_sources: int = 2
     require_dependency_model_for_resilient: bool = True
     block_on_cross_source_conflict: bool = True
 
     def __post_init__(self) -> None:
         if self.minimum_navigation_rank < 1:
             raise ValueError("minimum_navigation_rank must be >= 1")
-        if self.minimum_resilient_non_gnss_absolute_domains < 1:
-            raise ValueError("minimum_resilient_non_gnss_absolute_domains must be >= 1")
+        if self.minimum_resilient_non_gnss_absolute_sources < 1:
+            raise ValueError("minimum_resilient_non_gnss_absolute_sources must be >= 1")
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,7 @@ class IntegrityReport:
     dependency_model_available: bool = False
     declared_absolute_failure_domains: tuple[str, ...] = ()
     declared_non_gnss_absolute_failure_domains: tuple[str, ...] = ()
+    independent_non_gnss_absolute_sources: int = 0
     unregistered_active_absolute_sources: tuple[str, ...] = ()
     resilient_navigation_permitted: bool = False
     cross_source_consistent: bool | None = None
@@ -57,11 +58,10 @@ class IntegrityEngine:
     """Evidence-bounded integrity assessment for the AMEP runtime.
 
     The engine explicitly distinguishes health from independence. Multiple
-    healthy sources that share a declared failure domain do not receive multiple
-    units of resilience credit. Only ONLINE absolute sources receive diversity
-    credit for the resilient-mode decision; DEGRADED sources may still contribute
-    to the estimator/coverage heuristic but do not establish high-confidence
-    source independence.
+    healthy sources that share any declared integrity dependency do not receive
+    multiple units of resilience credit. Only ONLINE absolute sources receive
+    diversity credit; DEGRADED sources may still contribute to the estimator and
+    local coverage heuristic but cannot establish resilient-mode independence.
     """
 
     def __init__(
@@ -114,6 +114,7 @@ class IntegrityEngine:
             dependency_available = False
             abs_domains: tuple[str, ...] = ()
             non_gnss_domains: tuple[str, ...] = ()
+            independent_non_gnss = 0
             unregistered = tuple(active_absolute)
         else:
             unregistered = source_registry.unregistered(active_absolute)
@@ -127,14 +128,19 @@ class IntegrityEngine:
                 absolute_only=True,
                 non_gnss_only=True,
             )
+            independent_non_gnss = source_registry.maximum_independent_count(
+                creditable_absolute,
+                absolute_only=True,
+                non_gnss_only=True,
+            )
 
         full_non_gnss = (
             coverage.information_rank >= coverage.state_dim
             and coverage.has_healthy_non_gnss_absolute
         )
         resilient_permitted = full_non_gnss and (
-            len(non_gnss_domains)
-            >= self.policy.minimum_resilient_non_gnss_absolute_domains
+            independent_non_gnss
+            >= self.policy.minimum_resilient_non_gnss_absolute_sources
         )
         if self.policy.require_dependency_model_for_resilient and not dependency_available:
             resilient_permitted = False
@@ -174,8 +180,11 @@ class IntegrityEngine:
         if full_non_gnss and not resilient_permitted:
             if not dependency_available:
                 reasons.append("resilience_dependency_model_incomplete")
-            elif len(non_gnss_domains) < self.policy.minimum_resilient_non_gnss_absolute_domains:
-                reasons.append("insufficient_declared_independent_non_gnss_absolute_domains")
+            elif (
+                independent_non_gnss
+                < self.policy.minimum_resilient_non_gnss_absolute_sources
+            ):
+                reasons.append("insufficient_dependency_disjoint_non_gnss_absolute_sources")
 
         if unregistered:
             reasons.append("active_absolute_source_missing_dependency_descriptor")
@@ -194,6 +203,7 @@ class IntegrityEngine:
             dependency_model_available=dependency_available,
             declared_absolute_failure_domains=abs_domains,
             declared_non_gnss_absolute_failure_domains=non_gnss_domains,
+            independent_non_gnss_absolute_sources=independent_non_gnss,
             unregistered_active_absolute_sources=unregistered,
             resilient_navigation_permitted=resilient_permitted,
             cross_source_consistent=cross_source_consistent,
