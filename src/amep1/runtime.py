@@ -31,10 +31,10 @@ class AMEPRuntime:
     runtime_policy: RuntimePolicy = field(default_factory=RuntimePolicy)
     hard_fault_reason: str | None = None
 
-    def predict(self, imu: HorizontalIMUInput) -> float:
+    def predict(self, prediction_input: object) -> float:
         try:
-            return self.estimator.predict(imu)
-        except (TimebaseError, ValueError) as exc:
+            return self.estimator.predict(prediction_input)
+        except (TimebaseError, ValueError, TypeError) as exc:
             self.hard_fault_reason = f"prediction_fault:{exc}"
             self.supervisor.force_safe_hold(self.hard_fault_reason)
             raise
@@ -59,6 +59,26 @@ class AMEPRuntime:
         self.health.observe(source, timestamp_s, result)
         return result
 
+    def _legacy_update(
+        self,
+        *,
+        timestamp_s: float,
+        source: str,
+        kind: str,
+        values: np.ndarray,
+        covariance: np.ndarray,
+    ) -> MeasurementResult:
+        self._require_legacy_direct_updates()
+        result = self.estimator.update_measurement(
+            kind,
+            values,
+            covariance,
+            frame="local_ENU",
+            source=source,
+            allow_fusion=self.health.may_fuse(source),
+        )
+        return self._finalize_measurement(source, timestamp_s, result)
+
     def update_position(
         self,
         *,
@@ -68,15 +88,13 @@ class AMEPRuntime:
         N: float,
         sigma: float,
     ) -> MeasurementResult:
-        self._require_legacy_direct_updates()
-        result = self.estimator.update(
-            np.array([E, N], dtype=float),
-            np.array([[1, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0]], dtype=float),
-            np.eye(2) * float(sigma) ** 2,
+        return self._legacy_update(
+            timestamp_s=timestamp_s,
             source=source,
-            allow_fusion=self.health.may_fuse(source),
+            kind="position",
+            values=np.array([E, N], dtype=float),
+            covariance=np.eye(2) * float(sigma) ** 2,
         )
-        return self._finalize_measurement(source, timestamp_s, result)
 
     def update_water_velocity(
         self,
@@ -87,13 +105,13 @@ class AMEPRuntime:
         Vw_N: float,
         sigma: float,
     ) -> MeasurementResult:
-        self._require_legacy_direct_updates()
-        H = np.zeros((2, 7)); H[0, 2] = 1.0; H[1, 3] = 1.0
-        result = self.estimator.update(
-            np.array([Vw_E, Vw_N], dtype=float), H, np.eye(2) * float(sigma) ** 2,
-            source=source, allow_fusion=self.health.may_fuse(source),
+        return self._legacy_update(
+            timestamp_s=timestamp_s,
+            source=source,
+            kind="water_velocity",
+            values=np.array([Vw_E, Vw_N], dtype=float),
+            covariance=np.eye(2) * float(sigma) ** 2,
         )
-        return self._finalize_measurement(source, timestamp_s, result)
 
     def update_ground_velocity(
         self,
@@ -104,13 +122,13 @@ class AMEPRuntime:
         Vg_N: float,
         sigma: float,
     ) -> MeasurementResult:
-        self._require_legacy_direct_updates()
-        H = np.zeros((2, 7)); H[0, 2] = H[0, 4] = 1.0; H[1, 3] = H[1, 5] = 1.0
-        result = self.estimator.update(
-            np.array([Vg_E, Vg_N], dtype=float), H, np.eye(2) * float(sigma) ** 2,
-            source=source, allow_fusion=self.health.may_fuse(source),
+        return self._legacy_update(
+            timestamp_s=timestamp_s,
+            source=source,
+            kind="ground_velocity",
+            values=np.array([Vg_E, Vg_N], dtype=float),
+            covariance=np.eye(2) * float(sigma) ** 2,
         )
-        return self._finalize_measurement(source, timestamp_s, result)
 
     def update_current_prior(
         self,
@@ -121,13 +139,13 @@ class AMEPRuntime:
         C_N: float,
         sigma: float,
     ) -> MeasurementResult:
-        self._require_legacy_direct_updates()
-        H = np.zeros((2, 7)); H[0, 4] = 1.0; H[1, 5] = 1.0
-        result = self.estimator.update(
-            np.array([C_E, C_N], dtype=float), H, np.eye(2) * float(sigma) ** 2,
-            source=source, allow_fusion=self.health.may_fuse(source),
+        return self._legacy_update(
+            timestamp_s=timestamp_s,
+            source=source,
+            kind="current_prior",
+            values=np.array([C_E, C_N], dtype=float),
+            covariance=np.eye(2) * float(sigma) ** 2,
         )
-        return self._finalize_measurement(source, timestamp_s, result)
 
     def update_heading(
         self,
@@ -137,13 +155,13 @@ class AMEPRuntime:
         psi: float,
         sigma: float,
     ) -> MeasurementResult:
-        self._require_legacy_direct_updates()
-        H = np.zeros((1, 7)); H[0, 6] = 1.0
-        result = self.estimator.update(
-            np.array([psi], dtype=float), H, np.array([[float(sigma) ** 2]]),
-            source=source, angle_rows=(0,), allow_fusion=self.health.may_fuse(source),
+        return self._legacy_update(
+            timestamp_s=timestamp_s,
+            source=source,
+            kind="heading",
+            values=np.array([psi], dtype=float),
+            covariance=np.array([[float(sigma) ** 2]]),
         )
-        return self._finalize_measurement(source, timestamp_s, result)
 
     def _source_contract_error(self, envelope: MeasurementEnvelope, timestamp_uncertainty_s: float) -> str | None:
         descriptor = self.source_registry.descriptor(envelope.source)
@@ -175,36 +193,12 @@ class AMEPRuntime:
         *,
         now_s: float | None = None,
     ) -> IngestResult:
-        """Align, validate, cross-check, gate, fuse, and health-account a measurement."""
+        """Align, validate, cross-check, backend-update, and health-account a measurement."""
         alignment = self.time_aligner.align(envelope, now_s=now_s, commit=False)
         if not alignment.accepted or alignment.measurement is None:
             return IngestResult(False, alignment.reason, alignment, None)
 
         aligned = alignment.measurement
-        if envelope.frame != "local_ENU":
-            rejected = TimeAlignmentResult(False, "unsupported_frame", aligned)
-            return IngestResult(False, "unsupported_frame", rejected, None)
-
-        kind_models: dict[
-            str,
-            tuple[int, tuple[int, ...], tuple[tuple[int, int, float], ...]],
-        ] = {
-            "position": (2, (), ((0, 0, 1.0), (1, 1, 1.0))),
-            "water_velocity": (2, (), ((0, 2, 1.0), (1, 3, 1.0))),
-            "ground_velocity": (2, (), ((0, 2, 1.0), (0, 4, 1.0), (1, 3, 1.0), (1, 5, 1.0))),
-            "current_prior": (2, (), ((0, 4, 1.0), (1, 5, 1.0))),
-            "heading": (1, (0,), ((0, 6, 1.0),)),
-        }
-        model = kind_models.get(envelope.kind)
-        if model is None:
-            rejected = TimeAlignmentResult(False, "unsupported_measurement_kind", aligned)
-            return IngestResult(False, "unsupported_measurement_kind", rejected, None)
-
-        dimension, angle_rows, entries = model
-        if len(envelope.values) != dimension:
-            rejected = TimeAlignmentResult(False, "measurement_dimension_mismatch", aligned)
-            return IngestResult(False, "measurement_dimension_mismatch", rejected, None)
-
         source_contract_error = self._source_contract_error(
             envelope, aligned.timestamp_uncertainty_s
         )
@@ -219,20 +213,15 @@ class AMEPRuntime:
                 rejected = TimeAlignmentResult(False, "cross_source_consistency_conflict", aligned)
                 return IngestResult(False, "cross_source_consistency_conflict", rejected, None)
 
-        H = np.zeros((dimension, 7), dtype=float)
-        for row, col, value in entries:
-            H[row, col] = value
-        R = np.asarray(envelope.covariance, dtype=float)
-        z = np.asarray(envelope.values, dtype=float)
-
         try:
             allow_fusion = self.health.may_fuse(envelope.source)
-            result = self.estimator.update(
-                z,
-                H,
-                R,
+            result = self.estimator.update_measurement(
+                envelope.kind,
+                np.asarray(envelope.values, dtype=float),
+                np.asarray(envelope.covariance, dtype=float),
+                frame=envelope.frame,
                 source=envelope.source,
-                angle_rows=angle_rows,
+                metadata=envelope.metadata,
                 allow_fusion=allow_fusion,
             )
             self._finalize_measurement(envelope.source, aligned.timestamp_s, result)
@@ -281,16 +270,15 @@ class AMEPRuntime:
             consistency=self.consistency.last_report,
         )
         mode = self.supervisor.update(coverage, integrity)
-        vg_e, vg_n = self.estimator.ground_velocity
-        E, N = self.estimator.position
+        snapshot = self.estimator.snapshot()
         return NavigationStatus(
             timestamp_s=timestamp,
             mode=mode,
-            east_m=E,
-            north_m=N,
-            ground_velocity_e_mps=vg_e,
-            ground_velocity_n_mps=vg_n,
-            heading_rad=self.estimator.heading,
+            east_m=snapshot.east_m,
+            north_m=snapshot.north_m,
+            ground_velocity_e_mps=snapshot.ground_velocity_e_mps,
+            ground_velocity_n_mps=snapshot.ground_velocity_n_mps,
+            heading_rad=snapshot.heading_rad,
             containment_proxy_m=self.estimator.containment_proxy(),
             information_rank=coverage.information_rank,
             state_dim=coverage.state_dim,
@@ -302,8 +290,11 @@ class AMEPRuntime:
     def pnt_solution(self, now_s: float | None = None) -> PNTSolution:
         status = self.status(now_s)
         integrity = self.integrity_report(now_s)
-        x = self.estimator.x
-        covariance = tuple(tuple(float(v) for v in row) for row in self.estimator.P)
+        snapshot = self.estimator.snapshot()
+        covariance = tuple(
+            tuple(float(v) for v in row)
+            for row in np.asarray(snapshot.covariance, dtype=float)
+        )
         if status.timestamp_s is None:
             source_age_s = {name: None for name in self.health.states()}
         else:
@@ -312,14 +303,15 @@ class AMEPRuntime:
         return PNTSolution(
             timestamp_s=status.timestamp_s,
             mode=status.mode,
+            frame=snapshot.frame,
             east_m=status.east_m,
             north_m=status.north_m,
             ground_velocity_e_mps=status.ground_velocity_e_mps,
             ground_velocity_n_mps=status.ground_velocity_n_mps,
-            water_velocity_e_mps=float(x[2]),
-            water_velocity_n_mps=float(x[3]),
-            current_e_mps=float(x[4]),
-            current_n_mps=float(x[5]),
+            water_velocity_e_mps=snapshot.water_velocity_e_mps,
+            water_velocity_n_mps=snapshot.water_velocity_n_mps,
+            current_e_mps=snapshot.current_e_mps,
+            current_n_mps=snapshot.current_n_mps,
             heading_rad=status.heading_rad,
             covariance=covariance,
             containment_proxy_95_m=status.containment_proxy_m,
