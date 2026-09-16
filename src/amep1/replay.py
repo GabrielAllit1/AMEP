@@ -50,6 +50,8 @@ class DeterministicReplay:
 
     Events are ordered by ``(timestamp_s, sequence)``. The explicit sequence is
     required to make equal-timestamp ordering reproducible across platforms.
+    Replay evidence starts with the source-registry fingerprint so results are
+    bound to the declared dependency/failure-domain configuration.
     """
 
     def __init__(self, *, evidence_log: EvidenceLog | None = None) -> None:
@@ -63,6 +65,14 @@ class DeterministicReplay:
         final_now_s: float | None = None,
     ) -> ReplayResult:
         ordered = sorted(events, key=lambda event: (event.timestamp_s, event.sequence))
+        self.evidence_log.append(
+            "replay_configuration",
+            timestamp_s=None,
+            payload={
+                "event_count": len(ordered),
+                "source_registry_sha256": runtime.source_registry.fingerprint(),
+            },
+        )
         seen_sequences: set[int] = set()
         imu_count = 0
         measurement_count = 0
