@@ -1,91 +1,91 @@
 # AMEP-1 — Adaptive Maritime Estimation and PNT
 
-**Resilient multisensor navigation and autonomy-authority research for GNSS-degraded and GNSS-denied maritime operation.**
+**Resilient multisensor navigation and autonomy-authority research for GNSS-degraded and GNSS-denied operation.**
 
-AMEP-1 is a platform-neutral research stack for uncrewed surface-vessel navigation when GNSS cannot be treated as continuously available or trustworthy. The implementation centers on a hardened seven-state Extended Kalman Filter (EKF), explicit measurement/time contracts, innovation-consistency screening, sensor-health supervision, local constraint-coverage checks, an integrity contract, navigation-mode degradation, and operator/autonomy/safety authority gating.
+AMEP-1 is a maritime research implementation plus a growing set of portable PNT/integrity contracts. The current estimator is a seven-state USV-oriented horizontal EKF; the surrounding measurement, timing, source-dependency, integrity, replay, authority and output interfaces are being designed so platform-specific estimators and adapters can replace the maritime kernel without duplicating the assurance stack.
 
-> **Maturity:** Research software / software-in-the-loop (SIL) prototype. AMEP is being engineered toward operation through active GNSS-denial zones, but this repository is not a certified PNT, integrity, collision-avoidance, or vessel-control product.
+> **Maturity:** Research software / software-in-the-loop (SIL) prototype. This repository is not a certified PNT, integrity, collision-avoidance, flight-control, vessel-control, or safety-of-life product.
 
 ## Mission
 
-GNSS denial should be treated as a navigation-information problem, not as a single-sensor replacement problem. AMEP is designed to keep an estimate alive when GNSS is absent or rejected by combining the information that remains available: preprocessed inertial motion, water-relative velocity, estimated surface current, heading, ground-velocity aids, and non-GNSS absolute fixes such as radar-, bathymetry-, or vision-derived map fixes.
-
-The current target architecture is:
+GNSS denial should be treated as a navigation-information and integrity problem, not as a single-sensor replacement problem. AMEP combines dissimilar information while preserving source identity, timing, covariance, provenance, declared dependencies, health, integrity state, and navigation authority.
 
 ```text
-GNSS / GPS ─┐
-IMU ────────┤
-Radar ──────┤
-DVL / STW ──┤
-Vision/LiDAR┤
-Alt-PNT ────┘
-      │
-      v
-MeasurementEnvelope
-source + values + covariance + frame
-source/receive timestamps + clock domain
-provenance + timestamp uncertainty
-      │
-      v
-TimeAligner
-clock normalization / latency / age / order
-      │
-      v
-AMEPFilter (EKF)
-      │
-innovation / NIS / acceptance
-      │
-      v
-SensorHealthManager + ConstraintCoverage
-      │
-      v
-IntegrityEngine
-      │
-      v
-NavigationSupervisor
-NOMINAL / GPS_DENIED_RESILIENT /
-DEGRADED_DEAD_RECKONING / SAFE_HOLD
-      │
-      v
-PNTSolution
-position + velocity + heading + covariance
-source health + age + integrity state
-containment proxy + protection-bound availability
+PLATFORM-SPECIFIC ADAPTERS
+GNSS | IMU/INS | radar | vision/LiDAR | DVL/STW | alt-PNT | time/RF health
+                         |
+                         v
+                 MeasurementEnvelope
+ source + values + covariance + frame + provenance
+ source time + receive time + clock domain + uncertainty
+                         |
+                         v
+                     TimeAligner
+                         |
+                         v
+                    SourceRegistry
+ role + primary failure domain + shared dependencies + safety credit
+             |                           |
+             v                           v
+ CrossSourceConsistency           EstimatorBackend
+ independent absolute             AMEPFilter today
+ evidence before fusion           platform-specific later
+             |                           |
+             +-------------+-------------+
+                           v
+                  SensorHealthManager
+                           |
+                  ConstraintCoverage
+                           |
+                    IntegrityEngine
+ dependency diversity + conflicts + health + rank + evidence boundary
+                           |
+                 NavigationSupervisor
+ NOMINAL / GPS_DENIED_RESILIENT / DEGRADED_DEAD_RECKONING / SAFE_HOLD
+                           |
+                           v
+                      PNTSolution
+
+Parallel future path:
+MeasurementEnvelope -> DelayedMeasurementBackend -> fixed-lag/FGO corrections
+
+Verification path:
+ReplayEvent -> DeterministicReplay -> hash-chained EvidenceLog
 ```
 
-## Estimator
+## Current maritime estimator
 
-The reference state is
+The reference state remains:
 
 ```text
 x = [E, N, Vw_E, Vw_N, C_E, C_N, psi]^T
 ```
 
-where `E,N` are local horizontal position, `Vw` is water-relative velocity, `C` is estimated surface current, `psi` is heading, and ground velocity is `Vg = Vw + C`.
+`AMEPFilter` implements nonlinear propagation, the heading-sensitive Jacobian, chi-square NIS screening, Cholesky solves, Joseph-form covariance updates, and PSD covariance repair. It is intentionally auditable and **is not a full strapdown INS**. `HorizontalIMUInput` accepts only leveled, gravity-compensated horizontal acceleration plus yaw rate; raw specific force belongs in a calibrated INS/ESKF front end.
 
-`AMEPFilter` uses nonlinear state propagation with the full heading Jacobian terms for the published horizontal acceleration rotation, covariance propagation, chi-square normalized-innovation gating, Cholesky-based solves, Joseph-form covariance updates, and positive-semidefinite covariance repair. The current implementation is intentionally compact and auditable; it is not a full strapdown INS mechanization.
+`EstimatorBackend` is the portability seam. A future USV ESKF, UUV estimator, UAV navigation filter, UGV estimator, or invariant formulation must satisfy the runtime contract and earn its own replay/HIL/field evidence. The present water-current state model is not relabeled as universal vehicle dynamics.
 
-The IMU contract is strict: `HorizontalIMUInput` accepts only leveled, gravity-compensated horizontal translational acceleration plus yaw rate. Raw accelerometer specific force must be processed by a calibrated attitude/INS front end before entering AMEP.
+## Time and measurement contract
 
-## Measurement and time contract
+`MeasurementEnvelope` preserves source identity, measurement kind, values, full covariance, frame, source timestamp, receive timestamp, clock domain, sequence, provenance, metadata, and timestamp uncertainty.
 
-`MeasurementEnvelope` is the normalized boundary between sensor adapters and estimator fusion. It preserves source identity, measurement kind, values, full measurement covariance, coordinate frame, source timestamp, receive timestamp, clock domain, provenance, and timestamp uncertainty.
+`TimeAligner` normalizes declared clock domains and rejects unknown clocks, excessive latency/age, future skew, and out-of-order data. Runtime ingestion uses a two-phase align/commit path so rejected packets cannot poison the ordering watermark. The deterministic real-time estimator intentionally does not rewind; delayed measurements have a separate `DelayedMeasurementBackend` seam for future fixed-lag/factor-graph processing.
 
-`TimeAligner` currently performs explicit clock-domain normalization and rejects unknown clock domains, excessive latency/age, future-dated measurements beyond tolerance, and out-of-order measurements. Runtime ingestion uses a two-phase align/commit path so a malformed frame or measurement contract cannot poison the source-ordering watermark. The current real-time EKF does not rewind for delayed measurements; a future fixed-lag smoother or factor graph can consume the same envelope without silently changing the real-time estimator contract.
+The assured normalized path currently consumes local-ENU position, water velocity, ground velocity, current priors, and heading. Real GNSS, radar, camera/LiDAR, DVL/STW, RF-health, timing and vehicle-bus adapters remain integration work.
 
-The normalized runtime currently accepts local-ENU position, water velocity, ground velocity, current prior, and heading measurements. Raw GNSS, radar, camera/LiDAR, DVL/STW, RF-health, and vessel-bus interfaces still require real calibrated adapters.
+## Dependency-aware integrity
 
-## Integrity and GNSS-denial behavior
+AMEP v1.0 showed why estimator consistency alone is insufficient: mutually consistent biased absolute sources can remain plausible while the state is wrong and covariance is overconfident. The current architecture therefore separates **health** from **independence**.
 
-AMEP distinguishes availability loss from integrity failure.
+`SourceRegistry` declares a source's role, primary failure domain, optional shared dependency tokens, clock expectations, provenance requirements and whether the source receives safety credit. Shared dependencies can represent common clocks, maps, preprocessing services, receiver chains or other common causes. These declarations prevent differently named sensors from automatically receiving independent-source credit.
 
-**Jamming / outage:** when GNSS becomes stale or unavailable, the estimator continues propagation and can remain in `GPS_DENIED_RESILIENT` if the healthy non-GNSS constraint set still spans the reference state and includes a non-GNSS absolute-position source. With only partial constraints it degrades to `DEGRADED_DEAD_RECKONING`; insufficient coverage forces `SAFE_HOLD`.
+`CrossSourceConsistencyMonitor` compares near-synchronous absolute position fixes from declared dependency-disjoint source chains before fusion. A contradiction is rejected before estimator mutation and latches integrity to `ALERT`; two-source disagreement is not automatically attributed to either source because fault attribution is underdetermined.
 
-**Grossly inconsistent measurements:** chi-square innovation screening can reject outliers and the health manager can isolate repeatedly inconsistent sources. Isolated sources are probe-only until recovery criteria are satisfied.
+`IntegrityEngine` reports `MONITORING`, `DEGRADED`, `UNAVAILABLE`, or `ALERT`. For the reference policy, full 7/7 non-GNSS state coverage is **not enough** for `GPS_DENIED_RESILIENT`: at least two ONLINE non-GNSS absolute sources must form a pairwise dependency-disjoint set. Otherwise the mode is downgraded to `DEGRADED_DEAD_RECKONING` rather than overstating resilience.
 
-**Plausible spoofing / common-mode error:** this is not solved by an EKF or NIS gate alone. Mutually consistent biased sources can pass innovation checks. The published v1.0 evidence explicitly demonstrates this failure mode.
+Failure-domain declarations are an engineering model, not proof of independence. A real integration must derive them from its actual RF, clock, map, calibration, power, compute, network and preprocessing architecture.
 
-`IntegrityEngine` now gives this concern an explicit runtime contract. It can report `MONITORING`, `DEGRADED`, `UNAVAILABLE`, or `ALERT` and can veto normal navigation authority. It is not certified RAIM/FDE and does not claim a validated protection level.
+## Protection-bound boundary
 
 The current PNT solution deliberately reports:
 
@@ -94,45 +94,34 @@ horizontal_protection_bound_m = None
 protection_bound_validated = False
 ```
 
-The covariance-derived containment proxy remains a diagnostic only because the v1.0 correlated-common-bias experiment showed that it can be severely overconfident.
+The covariance-derived 95% containment proxy remains diagnostic only. The archived v1.0 correlated-common-bias experiment showed nominal 95% containment collapsing to roughly 8.7%, so this repository does not rename covariance as a protection level.
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the detailed subsystem contracts and [`docs/GNSS_DENIAL.md`](docs/GNSS_DENIAL.md) for the engineering objective and evidence gates.
+## Deterministic evidence and replay
 
-## Repository layout
+`DeterministicReplay` orders events by `(timestamp, sequence)` and drives the same runtime used online. `EvidenceLog` creates a canonical SHA-256 hash chain over replay configuration, events and final solution. Replay configuration includes the source-registry fingerprint, binding results to the declared dependency model.
 
-```text
-.
-├── src/amep1/              # importable AMEP package
-├── tests/                  # unit and integration contracts
-├── examples/               # minimal integration examples
-├── docs/                   # architecture, validation, denial-zone notes
-├── .github/workflows/      # CI definition
-├── MANIFEST.md             # file-by-file repository map
-├── pyproject.toml          # package/build/test metadata
-├── CONTRIBUTING.md         # engineering workflow
-├── SECURITY.md             # security and safety reporting
-└── CITATION.cff            # research citation metadata
-```
-
-The complete file-by-file description is in [`MANIFEST.md`](MANIFEST.md).
+This is deterministic tamper-evidence for software experiments—not a digital signature, trusted clock, secure audit appliance, or operational certification artifact.
 
 ## Core modules
 
 | Module | Responsibility |
 | --- | --- |
-| `time_alignment.py` | Measurement envelope, source/receive timestamps, clock domains, timestamp uncertainty, latency/age/order checks |
-| `estimator.py` | Seven-state EKF predict/update, NIS gating, Joseph covariance update, containment proxy |
+| `backend.py` | Portable real-time estimator protocol plus delayed-measurement backend seam |
+| `time_alignment.py` | Measurement envelope, source/receive time, clock domains, uncertainty, latency/age/order checks |
+| `source_registry.py` | Source roles, failure domains, shared dependencies, safety credit, deterministic configuration fingerprint |
+| `consistency.py` | Pre-fusion cross-source absolute consistency evidence |
+| `estimator.py` | Current seven-state maritime EKF |
 | `health.py` | Freshness, rejection history, isolation, probe-only recovery, source age |
-| `constraints.py` | Local information-rank/constraint-coverage heuristic |
-| `integrity.py` | Explicit integrity status, navigation permission, and protection-bound availability contract |
+| `constraints.py` | Local information-rank/constraint-coverage heuristic; not formal observability |
+| `integrity.py` | Dependency-aware integrity state and resilient-mode permission; no certified protection level |
 | `authority.py` | Integrity-aware navigation modes and operator/autonomy/safety authority policy |
-| `solution.py` | Rich PNT output with state covariance, source health/age, integrity state, and evidence-bounded unsupported fields |
-| `runtime.py` | Integration façade binding alignment, estimator, health, coverage, integrity, mode supervision, and PNT output |
-| `comms.py` | Deterministic communications-link priority and freshness failover |
-| `profile.py` | Generic reference sensor policies and state constraints |
+| `solution.py` | PNT output with covariance, health/age, integrity state and explicit unsupported fields |
+| `replay.py` | Deterministic event replay through the online runtime |
+| `evidence.py` | Canonical hash-chained software evidence records |
+| `runtime.py` | Integration façade binding alignment, consistency, estimator, health, coverage, integrity and PNT output |
+| `comms.py` | Deterministic communications-link freshness/priority supervision |
+| `profile.py` | Reference source policies, dependency declarations and fully wired reference runtime |
 | `timing.py` | Host-SIL deadline watchdog |
-| `types.py` | Shared typed input/result/status contracts |
-| `config.py` | Estimator/process-noise/source policy configuration |
 
 ## Install and verify
 
@@ -142,32 +131,30 @@ python -m compileall -q src tests examples
 pytest
 ```
 
-The repository includes a GitHub Actions definition for Python 3.11. At the time of the PNT-backbone integration, GitHub jobs were failing before runner assignment, so those workflow failures are infrastructure state rather than executed test failures. The branch was separately reconstructed in a scratch Python environment and the source compiled with the full repository test inventory passing 27/27; this is software validation only, not operational PNT evidence.
+The repository's GitHub Actions jobs have previously failed before runner assignment, so a red workflow with zero executed steps is infrastructure state, not test evidence. Validation results for each hardening tranche are recorded separately under `docs/validation/` when executable validation is available.
 
-## Current evidence boundary
+## Production-hardening plan
 
-The software baseline has unit/integration coverage for EKF propagation and updates, covariance stability, gross-outlier rejection, source isolation/recovery, freshness, constraint-rank modes, communications failover, watchdog behavior, fail-closed runtime behavior, clock-domain normalization, out-of-order rejection, two-phase source-time watermarking, full-covariance normalized measurement ingestion, explicit integrity veto, and rich PNT output semantics.
+The detailed research/standards review and prioritized production gates are in [`docs/PRODUCTION_HARDENING_2026.md`](docs/PRODUCTION_HARDENING_2026.md). The next major technical gates are:
 
-The following remain open before AMEP can legitimately be called deployable GNSS-denial navigation:
+- recorded real multisensor replay with independently referenced truth and frozen fault/outage windows;
+- calibrated strapdown INS/ESKF preprocessing with inertial bias states and explicit frame/gravity conventions;
+- measured clock synchronization, latency, lever-arm, boresight and datum uncertainty;
+- real radar/bathymetry/vision/LiDAR/DVL/GNSS-RF-health and bus adapters;
+- dependency-derived multi-hypothesis FDE and empirically calibrated integrity bounds;
+- target-hardware WCET/jitter/overload/watchdog evidence;
+- HIL fault-injection campaigns and controlled field/water trials;
+- secure-development, SBOM, dependency-locking, signed-release and independent-replication evidence.
 
-- recorded maritime replay with independently referenced truth;
-- same-sensor conventional EKF/UKF comparisons under predeclared outage intervals;
-- calibrated strapdown INS/ESKF preprocessing, bias states, lever arms, boresight, datum and measured timing provenance;
-- real radar/bathymetry/vision/LiDAR/DVL/GNSS-RF-health aiding adapters and vessel-bus validation;
-- explicit common-cause source-dependence modeling, fault detection/exclusion, and defensible protection/integrity bounds;
-- target-hardware WCET, jitter, overload and watchdog evidence;
-- HIL fault-injection campaigns and controlled water trials;
-- cybersecurity, software-supply-chain assurance, and independent replication.
-
-A factor graph or fixed-lag smoother is an optional future asynchronous/replay/calibration backend, not a reason to replace the deterministic real-time EKF by default.
+A factor graph or fixed-lag smoother is a candidate asynchronous/replay/calibration backend, not a reason to remove the deterministic real-time estimator.
 
 ## Research release
 
 AMEP-1 Version 1.0 research report: **Gabriel V. Allit, SALT19**  
 Zenodo DOI: **10.5281/zenodo.22561851**
 
-The paper's negative findings remain part of the design contract: clean-condition superiority was not demonstrated, common-mode position bias defeated the current integrity assumptions, and the covariance-derived radius is not a certified protection level. The current GitHub code may evolve beyond individual implementation limitations documented in the archived v1.0 release; the historical release and its evidence are not rewritten retroactively.
+The paper's negative findings remain part of the design contract: clean-condition superiority was not demonstrated, common-mode position bias defeated the current integrity assumptions, and the covariance-derived radius is not a certified protection level. Current GitHub work may close implementation gaps, but the historical release and its evidence are not rewritten retroactively.
 
-## Rights
+## Rights and use boundary
 
-Copyright © 2026 Gabriel V. Allit. All rights reserved. No license to deploy this software in safety-critical or operational navigation is granted by this repository.
+Copyright © 2026 Gabriel V. Allit. All rights reserved. No license to deploy this software in safety-critical or operational navigation is granted by this repository. This architecture work is limited to navigation, estimation, integrity, timing, modular interfaces, replay, degradation and assurance; it does not implement autonomous targeting or weapon-employment functions.
