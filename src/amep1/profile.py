@@ -3,13 +3,14 @@ from __future__ import annotations
 from .config import SourcePolicy
 from .constraints import ConstraintCoverage, ConstraintSpec
 from .health import SensorHealthManager
+from .source_registry import SourceClass, SourceDescriptor, SourceRegistry
 
 
 def build_reference_health_and_constraints() -> tuple[SensorHealthManager, ConstraintCoverage]:
-    """Create generic AMEP-1 v1.0 source classes with conservative example freshness.
+    """Create generic AMEP-1 source classes with conservative example freshness.
 
     Freshness values are integration defaults only and must be replaced with declared
-    interface/update-rate budgets for the actual vessel and sensors.
+    interface/update-rate budgets for the actual vehicle and sensors.
     """
     health = SensorHealthManager()
     coverage = ConstraintCoverage()
@@ -28,3 +29,48 @@ def build_reference_health_and_constraints() -> tuple[SensorHealthManager, Const
         health.register(name, policy)
         coverage.register(name, spec)
     return health, coverage
+
+
+def build_reference_source_registry() -> SourceRegistry:
+    """Declare reference source roles and *declared* common-cause domains.
+
+    Domain names are architectural assumptions for integrity bookkeeping, not
+    evidence of statistical independence. A vehicle integration must replace or
+    refine them from its actual sensor, clock, map, RF, power, compute, and data
+    dependency analysis before taking safety credit.
+    """
+    registry = SourceRegistry()
+    descriptors = (
+        SourceDescriptor(
+            "gnss",
+            SourceClass.ABSOLUTE_POSITION,
+            "gnss_rf_space_receiver_chain",
+            absolute_position=True,
+            gnss=True,
+        ),
+        SourceDescriptor(
+            "radar_map_fix",
+            SourceClass.ABSOLUTE_POSITION,
+            "radar_map_localization_chain",
+            absolute_position=True,
+        ),
+        SourceDescriptor(
+            "bathy_map_fix",
+            SourceClass.ABSOLUTE_POSITION,
+            "bathymetry_map_localization_chain",
+            absolute_position=True,
+        ),
+        SourceDescriptor(
+            "visual_map_fix",
+            SourceClass.ABSOLUTE_POSITION,
+            "vision_map_localization_chain",
+            absolute_position=True,
+        ),
+        SourceDescriptor("speed_log", SourceClass.WATER_VELOCITY, "water_speed_sensor_chain"),
+        SourceDescriptor("ground_velocity", SourceClass.GROUND_VELOCITY, "ground_velocity_sensor_chain"),
+        SourceDescriptor("current_prior", SourceClass.CURRENT_PRIOR, "environmental_current_model_chain"),
+        SourceDescriptor("gyrocompass", SourceClass.HEADING, "heading_sensor_chain"),
+    )
+    for descriptor in descriptors:
+        registry.register(descriptor)
+    return registry
