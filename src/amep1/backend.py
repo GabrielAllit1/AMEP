@@ -1,47 +1,59 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from .types import HorizontalIMUInput, MeasurementResult
+from .types import MeasurementResult
+
+
+@dataclass(frozen=True)
+class EstimatorSnapshot:
+    """Portable horizontal navigation projection from a platform estimator.
+
+    Internal estimator state dimension and representation are intentionally not
+    exposed to the orchestration layer. Optional maritime fields are populated by
+    AMEPFilter and may be absent for other platform-specific estimators.
+    """
+
+    east_m: float
+    north_m: float
+    ground_velocity_e_mps: float
+    ground_velocity_n_mps: float
+    heading_rad: float
+    covariance: np.ndarray
+    water_velocity_e_mps: float | None = None
+    water_velocity_n_mps: float | None = None
+    current_e_mps: float | None = None
+    current_n_mps: float | None = None
 
 
 @runtime_checkable
 class EstimatorBackend(Protocol):
-    """Minimal real-time estimator contract consumed by ``AMEPRuntime``.
+    """State-dimension-agnostic real-time estimator contract.
 
-    The current implementation is ``AMEPFilter``. Keeping runtime orchestration
-    behind this protocol permits a future maritime ESKF, invariant filter, or
-    another platform-specific real-time estimator without coupling source,
-    integrity, replay, or authority layers to one estimator class.
+    Measurement semantics cross the boundary as named kinds plus values and
+    covariance; each estimator owns its own state layout and observation models.
+    This permits an ESKF or another platform-specific estimator to replace the
+    seven-state maritime filter without making ``AMEPRuntime`` construct its H.
     """
 
-    x: np.ndarray
-    P: np.ndarray
     last_t: float | None
 
-    def predict(self, imu: HorizontalIMUInput) -> float: ...
+    def predict(self, prediction_input: object) -> float: ...
 
-    def update(
+    def update_measurement(
         self,
-        z: np.ndarray,
-        H: np.ndarray,
-        R: np.ndarray,
+        kind: str,
+        values: np.ndarray,
+        covariance: np.ndarray,
         *,
         source: str,
-        angle_rows: tuple[int, ...] = (),
         allow_fusion: bool = True,
     ) -> MeasurementResult: ...
 
-    @property
-    def position(self) -> tuple[float, float]: ...
-
-    @property
-    def ground_velocity(self) -> tuple[float, float]: ...
-
-    @property
-    def heading(self) -> float: ...
+    def snapshot(self) -> EstimatorSnapshot: ...
 
     def containment_proxy(self) -> float: ...
 
@@ -50,9 +62,9 @@ class EstimatorBackend(Protocol):
 class DelayedMeasurementBackend(Protocol):
     """Optional seam for fixed-lag/factor-graph delayed-measurement processing.
 
-    AMEP's current real-time EKF intentionally rejects out-of-order input. A
+    The real-time estimator may intentionally reject out-of-order input. A
     smoother can implement this interface in parallel and return corrected state
-    products without changing the deterministic real-time estimator contract.
+    products without changing the deterministic low-latency estimator contract.
     """
 
     def ingest_delayed(self, *, source: str, timestamp_s: float, payload: object) -> None: ...
