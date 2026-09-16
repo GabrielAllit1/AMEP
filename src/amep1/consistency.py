@@ -62,8 +62,8 @@ class CrossSourceConsistencyMonitor:
 
     Assessment and commit are separate so a contradictory absolute fix can be
     rejected before it mutates either the estimator or the monitor history.
-    This monitor deliberately does not identify or exclude a culprit: two-source
-    disagreement is integrity evidence, not sufficient fault attribution.
+    The latched report is changed only by a detected conflict or a successfully
+    committed observation; an EKF-rejected candidate cannot clear prior evidence.
     """
 
     def __init__(self, policy: ConsistencyPolicy | None = None) -> None:
@@ -163,25 +163,36 @@ class CrossSourceConsistencyMonitor:
         registry: SourceRegistry,
     ) -> ConsistencyReport:
         _, report = self._candidate(aligned, registry)
-        self._last_report = report
         return report
+
+    def latch_conflict(self, report: ConsistencyReport) -> None:
+        if report.consistent:
+            raise ValueError("cannot latch a consistency report without conflicts")
+        self._last_report = report
 
     def commit_position(
         self,
         aligned: AlignedMeasurement,
         registry: SourceRegistry,
+        *,
+        report: ConsistencyReport | None = None,
     ) -> None:
-        observation, _ = self._candidate(aligned, registry)
+        observation, computed = self._candidate(aligned, registry)
+        effective = computed if report is None else report
+        if not effective.consistent:
+            raise ValueError("cannot commit an inconsistent absolute observation")
         if observation is not None:
             self._latest[observation.source] = observation
+            self._last_report = effective
 
     def observe_position(
         self,
         aligned: AlignedMeasurement,
         registry: SourceRegistry,
     ) -> ConsistencyReport:
-        observation, report = self._candidate(aligned, registry)
-        self._last_report = report
-        if observation is not None and report.consistent:
-            self._latest[observation.source] = observation
+        report = self.assess_position(aligned, registry)
+        if report.consistent:
+            self.commit_position(aligned, registry, report=report)
+        else:
+            self.latch_conflict(report)
         return report
