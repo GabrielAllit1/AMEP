@@ -6,6 +6,7 @@ import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 from scipy.stats import chi2
 
+from .backend import EstimatorSnapshot
 from .config import EstimatorConfig
 from .math_utils import nearest_psd, require_finite, symmetrize, wrap_angle
 from .types import HorizontalIMUInput, MeasurementResult
@@ -21,7 +22,9 @@ class AMEPFilter:
 
     State: [E, N, Vw_E, Vw_N, C_E, C_N, psi]^T
 
-    This remains a horizontal research estimator; it is not a full strap-down INS.
+    This remains a horizontal maritime research estimator; it is not a full
+    strap-down INS. Runtime orchestration consumes its semantic backend methods
+    rather than depending on this internal state layout.
     """
 
     config: EstimatorConfig = field(default_factory=EstimatorConfig)
@@ -38,6 +41,8 @@ class AMEPFilter:
         self.x[6] = wrap_angle(self.x[6])
 
     def predict(self, imu: HorizontalIMUInput) -> float:
+        if not isinstance(imu, HorizontalIMUInput):
+            raise TypeError("AMEPFilter expects HorizontalIMUInput prediction data")
         imu.validate()
         require_finite(
             "imu",
@@ -181,7 +186,6 @@ class AMEPFilter:
         H = np.asarray(H, dtype=float)
         R = np.asarray(R, dtype=float)
         factor = cho_factor(S, lower=True, check_finite=True)
-        # K = P H^T S^-1, computed without explicit inversion.
         PHt = self.P @ H.T
         K = cho_solve(factor, PHt.T).T
         self.x = self.x + K @ r
@@ -199,30 +203,80 @@ class AMEPFilter:
             source, True, True, nis, threshold, np.asarray(z).size, "accepted_and_fused"
         )
 
+    def update_measurement(
+        self,
+        kind: str,
+        values: np.ndarray,
+        covariance: np.ndarray,
+        *,
+        source: str,
+        allow_fusion: bool = True,
+    ) -> MeasurementResult:
+        """Apply one semantic measurement without exposing the 7-state layout."""
+        models: dict[
+            str,
+            tuple[int, tuple[int, ...], tuple[tuple[int, int, float], ...]],
+        ] = {
+            "position": (2, (), ((0, 0, 1.0), (1, 1, 1.0))),
+            "water_velocity": (2, (), ((0, 2, 1.0), (1, 3, 1.0))),
+            "ground_velocity": (
+                2,
+                (),
+                ((0, 2, 1.0), (0, 4, 1.0), (1, 3, 1.0), (1, 5, 1.0)),
+            ),
+            "current_prior": (2, (), ((0, 4, 1.0), (1, 5, 1.0))),
+            "heading": (1, (0,), ((0, 6, 1.0),)),
+        }
+        model = models.get(kind)
+        if model is None:
+            raise ValueError(f"unsupported AMEPFilter measurement kind: {kind}")
+        dimension, angle_rows, entries = model
+        z = np.asarray(values, dtype=float).reshape(-1)
+        if z.size != dimension:
+            raise ValueError(
+                f"measurement kind {kind} requires dimension {dimension}, got {z.size}"
+            )
+        H = np.zeros((dimension, 7), dtype=float)
+        for row, col, value in entries:
+            H[row, col] = value
+        return self.update(
+            z,
+            H,
+            np.asarray(covariance, dtype=float),
+            source=source,
+            angle_rows=angle_rows,
+            allow_fusion=allow_fusion,
+        )
+
     def update_position(self, E: float, N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
-        H = np.zeros((2, 7)); H[0, 0] = 1.0; H[1, 1] = 1.0
-        R = np.eye(2) * float(sigma) ** 2
-        return self.update(np.array([E, N]), H, R, source=source, allow_fusion=allow_fusion)
+        return self.update_measurement(
+            "position", np.array([E, N]), np.eye(2) * float(sigma) ** 2,
+            source=source, allow_fusion=allow_fusion,
+        )
 
     def update_water_velocity(self, Vw_E: float, Vw_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
-        H = np.zeros((2, 7)); H[0, 2] = 1.0; H[1, 3] = 1.0
-        R = np.eye(2) * float(sigma) ** 2
-        return self.update(np.array([Vw_E, Vw_N]), H, R, source=source, allow_fusion=allow_fusion)
+        return self.update_measurement(
+            "water_velocity", np.array([Vw_E, Vw_N]), np.eye(2) * float(sigma) ** 2,
+            source=source, allow_fusion=allow_fusion,
+        )
 
     def update_ground_velocity(self, Vg_E: float, Vg_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
-        H = np.zeros((2, 7)); H[0, 2] = H[0, 4] = 1.0; H[1, 3] = H[1, 5] = 1.0
-        R = np.eye(2) * float(sigma) ** 2
-        return self.update(np.array([Vg_E, Vg_N]), H, R, source=source, allow_fusion=allow_fusion)
+        return self.update_measurement(
+            "ground_velocity", np.array([Vg_E, Vg_N]), np.eye(2) * float(sigma) ** 2,
+            source=source, allow_fusion=allow_fusion,
+        )
 
     def update_current_prior(self, C_E: float, C_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
-        H = np.zeros((2, 7)); H[0, 4] = 1.0; H[1, 5] = 1.0
-        R = np.eye(2) * float(sigma) ** 2
-        return self.update(np.array([C_E, C_N]), H, R, source=source, allow_fusion=allow_fusion)
+        return self.update_measurement(
+            "current_prior", np.array([C_E, C_N]), np.eye(2) * float(sigma) ** 2,
+            source=source, allow_fusion=allow_fusion,
+        )
 
     def update_heading(self, psi: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
-        H = np.zeros((1, 7)); H[0, 6] = 1.0
-        R = np.array([[float(sigma) ** 2]])
-        return self.update(np.array([psi]), H, R, source=source, angle_rows=(0,), allow_fusion=allow_fusion)
+        return self.update_measurement(
+            "heading", np.array([psi]), np.array([[float(sigma) ** 2]]),
+            source=source, allow_fusion=allow_fusion,
+        )
 
     @property
     def position(self) -> tuple[float, float]:
@@ -235,6 +289,21 @@ class AMEPFilter:
     @property
     def heading(self) -> float:
         return float(self.x[6])
+
+    def snapshot(self) -> EstimatorSnapshot:
+        vg_e, vg_n = self.ground_velocity
+        return EstimatorSnapshot(
+            east_m=float(self.x[0]),
+            north_m=float(self.x[1]),
+            ground_velocity_e_mps=vg_e,
+            ground_velocity_n_mps=vg_n,
+            heading_rad=float(self.x[6]),
+            covariance=self.P.copy(),
+            water_velocity_e_mps=float(self.x[2]),
+            water_velocity_n_mps=float(self.x[3]),
+            current_e_mps=float(self.x[4]),
+            current_n_mps=float(self.x[5]),
+        )
 
     def containment_proxy(self) -> float:
         P_EN = symmetrize(self.P[:2, :2])
