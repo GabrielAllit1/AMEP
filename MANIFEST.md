@@ -42,7 +42,7 @@ This manifest describes every authoritative source, test, example, and project-s
 | `tests/test_estimator.py` | Verifies water/current ground-velocity semantics, finite-difference heading Jacobian terms, gravity-compensated IMU contract, monotonic time, maximum prediction gap, covariance reduction, outlier rejection, velocity/current/heading updates, and PSD covariance preservation. |
 | `tests/test_supervision.py` | Verifies source isolation and recovery, stale transitions, reachable degraded mode, GNSS and non-GNSS full-rank navigation modes, low-rank `SAFE_HOLD`, and probe-only handling of isolated sources. |
 | `tests/test_operations.py` | Verifies communications failover, deadline-watchdog behavior, generic reference-profile contents, and runtime hard-fault latching to `SAFE_HOLD`. |
-| `tests/test_pnt_backbone.py` | Verifies clock-domain normalization, timestamp uncertainty propagation, out-of-order rejection, unknown-clock fail-closed behavior, full-covariance normalized fusion, integrity veto behavior, full-rank nominal supervision, rich PNT output fields, and explicit absence of a validated protection bound. |
+| `tests/test_pnt_backbone.py` | Verifies clock-domain normalization, timestamp uncertainty propagation, out-of-order rejection, unknown-clock fail-closed behavior, rejected-contract watermark safety, full-covariance normalized fusion, integrity veto behavior, full-rank nominal supervision, rich PNT output fields, and explicit absence of a validated protection bound. |
 
 ## `examples/`
 
@@ -58,7 +58,7 @@ This manifest describes every authoritative source, test, example, and project-s
 | `docs/GNSS_DENIAL.md` | Defines the active GNSS-denial engineering objective, how the current EKF stack behaves through outage/jamming, what it can reject, what spoofing/common-mode failures remain, and the staged validation path. |
 | `docs/VALIDATION.md` | Summarizes current software evidence and explicitly separates software tests from recorded-data/HIL/water-trial evidence. |
 | `docs/validation/TEST_RESULTS.txt` | Preserved validation snapshot from the pre-normalization package: 21 software tests passed and source/tests compiled. Historical software evidence only. |
-| `docs/validation/PNT_BACKBONE_TEST_RESULTS.txt` | PNT-backbone scratch-validation snapshot: source/tests compiled and the 26-test repository inventory passed; records the no-runner GitHub Actions limitation and the software-only evidence boundary. |
+| `docs/validation/PNT_BACKBONE_TEST_RESULTS.txt` | PNT-backbone scratch-validation snapshot: source/tests compiled and the 27-test repository inventory passed; records the no-runner GitHub Actions limitation and the software-only evidence boundary. |
 
 ## `.github/workflows/`
 
