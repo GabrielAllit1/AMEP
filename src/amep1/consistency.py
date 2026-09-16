@@ -163,6 +163,8 @@ class CrossSourceConsistencyMonitor:
         registry: SourceRegistry,
     ) -> ConsistencyReport:
         _, report = self._candidate(aligned, registry)
+        if not report.consistent:
+            self._last_report = report
         return report
 
     def latch_conflict(self, report: ConsistencyReport) -> None:
@@ -193,6 +195,4 @@ class CrossSourceConsistencyMonitor:
         report = self.assess_position(aligned, registry)
         if report.consistent:
             self.commit_position(aligned, registry, report=report)
-        else:
-            self.latch_conflict(report)
         return report
