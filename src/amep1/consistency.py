@@ -60,10 +60,10 @@ class _AbsoluteObservation:
 class CrossSourceConsistencyMonitor:
     """Near-synchronous consistency check across declared independent sources.
 
-    This monitor deliberately does not identify or exclude a culprit. With only
-    two disagreeing sources, fault attribution is generally underdetermined. The
-    result is therefore integrity evidence that can remove safety credit or force
-    a fail-closed mode while separate FDE logic decides which source to isolate.
+    Assessment and commit are separate so a contradictory absolute fix can be
+    rejected before it mutates either the estimator or the monitor history.
+    This monitor deliberately does not identify or exclude a culprit: two-source
+    disagreement is integrity evidence, not sufficient fault attribution.
     """
 
     def __init__(self, policy: ConsistencyPolicy | None = None) -> None:
@@ -89,36 +89,32 @@ class CrossSourceConsistencyMonitor:
         for source in stale:
             self._latest.pop(source, None)
 
-    def observe_position(
+    def _candidate(
         self,
         aligned: AlignedMeasurement,
         registry: SourceRegistry,
-    ) -> ConsistencyReport:
+    ) -> tuple[_AbsoluteObservation | None, ConsistencyReport]:
         envelope = aligned.envelope
         descriptor = registry.descriptor(envelope.source)
+        threshold = float(chi2.ppf(self.policy.probability, df=2))
         if descriptor is None or not descriptor.absolute_position or not descriptor.safety_credit:
-            self._last_report = ConsistencyReport(0, (), None, self._last_report.threshold)
-            return self._last_report
+            return None, ConsistencyReport(0, (), None, threshold)
         if envelope.kind != "position" or len(envelope.values) != 2:
-            return self._last_report
+            return None, ConsistencyReport(0, (), None, threshold)
 
         value = np.asarray(envelope.values, dtype=float).reshape(2)
         covariance = np.asarray(envelope.covariance, dtype=float).reshape(2, 2)
         if not np.all(np.isfinite(value)) or not np.all(np.isfinite(covariance)):
-            return self._last_report
+            return None, ConsistencyReport(0, (), None, threshold)
 
         self._prune(aligned.timestamp_s)
-        threshold = float(chi2.ppf(self.policy.probability, df=2))
         conflicts: list[SourceConflict] = []
         checked = 0
         worst: float | None = None
-
         for other in self._latest.values():
             if other.source == envelope.source:
                 continue
             if other.failure_domain == descriptor.failure_domain:
-                # Multiple observations sharing a failure domain must not be
-                # counted as independent integrity evidence.
                 continue
             separation = abs(aligned.timestamp_s - other.timestamp_s)
             if separation > self.policy.max_time_separation_s:
@@ -147,17 +143,45 @@ class CrossSourceConsistencyMonitor:
                     )
                 )
 
-        self._latest[envelope.source] = _AbsoluteObservation(
+        observation = _AbsoluteObservation(
             source=envelope.source,
             timestamp_s=aligned.timestamp_s,
             value=value.copy(),
             covariance=covariance.copy(),
             failure_domain=descriptor.failure_domain,
         )
-        self._last_report = ConsistencyReport(
+        return observation, ConsistencyReport(
             checked_pairs=checked,
             conflicts=tuple(conflicts),
             worst_nis=worst,
             threshold=threshold,
         )
-        return self._last_report
+
+    def assess_position(
+        self,
+        aligned: AlignedMeasurement,
+        registry: SourceRegistry,
+    ) -> ConsistencyReport:
+        _, report = self._candidate(aligned, registry)
+        self._last_report = report
+        return report
+
+    def commit_position(
+        self,
+        aligned: AlignedMeasurement,
+        registry: SourceRegistry,
+    ) -> None:
+        observation, _ = self._candidate(aligned, registry)
+        if observation is not None:
+            self._latest[observation.source] = observation
+
+    def observe_position(
+        self,
+        aligned: AlignedMeasurement,
+        registry: SourceRegistry,
+    ) -> ConsistencyReport:
+        observation, report = self._candidate(aligned, registry)
+        self._last_report = report
+        if observation is not None and report.consistent:
+            self._latest[observation.source] = observation
+        return report
