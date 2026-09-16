@@ -6,6 +6,7 @@ import numpy as np
 
 from .authority import NavigationSupervisor
 from .backend import EstimatorBackend
+from .config import RuntimePolicy
 from .consistency import CrossSourceConsistencyMonitor
 from .constraints import ConstraintCoverage
 from .estimator import TimebaseError
@@ -27,6 +28,7 @@ class AMEPRuntime:
     integrity: IntegrityEngine = field(default_factory=IntegrityEngine)
     source_registry: SourceRegistry = field(default_factory=SourceRegistry)
     consistency: CrossSourceConsistencyMonitor = field(default_factory=CrossSourceConsistencyMonitor)
+    runtime_policy: RuntimePolicy = field(default_factory=RuntimePolicy)
     hard_fault_reason: str | None = None
 
     def predict(self, imu: HorizontalIMUInput) -> float:
@@ -40,6 +42,13 @@ class AMEPRuntime:
     def clear_hard_fault(self) -> None:
         """Explicit operator/integration recovery hook after the root cause is handled."""
         self.hard_fault_reason = None
+
+    def _require_legacy_direct_updates(self) -> None:
+        if not self.runtime_policy.allow_legacy_direct_updates:
+            raise RuntimeError(
+                "legacy direct measurement updates are disabled by runtime policy; "
+                "use ingest_measurement so timing/provenance/dependency checks cannot be bypassed"
+            )
 
     def _finalize_measurement(
         self,
@@ -59,6 +68,7 @@ class AMEPRuntime:
         N: float,
         sigma: float,
     ) -> MeasurementResult:
+        self._require_legacy_direct_updates()
         result = self.estimator.update(
             np.array([E, N], dtype=float),
             np.array([[1, 0, 0, 0, 0, 0, 0], [0, 1, 0, 0, 0, 0, 0]], dtype=float),
@@ -77,6 +87,7 @@ class AMEPRuntime:
         Vw_N: float,
         sigma: float,
     ) -> MeasurementResult:
+        self._require_legacy_direct_updates()
         H = np.zeros((2, 7)); H[0, 2] = 1.0; H[1, 3] = 1.0
         result = self.estimator.update(
             np.array([Vw_E, Vw_N], dtype=float), H, np.eye(2) * float(sigma) ** 2,
@@ -93,6 +104,7 @@ class AMEPRuntime:
         Vg_N: float,
         sigma: float,
     ) -> MeasurementResult:
+        self._require_legacy_direct_updates()
         H = np.zeros((2, 7)); H[0, 2] = H[0, 4] = 1.0; H[1, 3] = H[1, 5] = 1.0
         result = self.estimator.update(
             np.array([Vg_E, Vg_N], dtype=float), H, np.eye(2) * float(sigma) ** 2,
@@ -109,6 +121,7 @@ class AMEPRuntime:
         C_N: float,
         sigma: float,
     ) -> MeasurementResult:
+        self._require_legacy_direct_updates()
         H = np.zeros((2, 7)); H[0, 4] = 1.0; H[1, 5] = 1.0
         result = self.estimator.update(
             np.array([C_E, C_N], dtype=float), H, np.eye(2) * float(sigma) ** 2,
@@ -124,6 +137,7 @@ class AMEPRuntime:
         psi: float,
         sigma: float,
     ) -> MeasurementResult:
+        self._require_legacy_direct_updates()
         H = np.zeros((1, 7)); H[0, 6] = 1.0
         result = self.estimator.update(
             np.array([psi], dtype=float), H, np.array([[float(sigma) ** 2]]),
@@ -198,9 +212,10 @@ class AMEPRuntime:
             rejected = TimeAlignmentResult(False, source_contract_error, aligned)
             return IngestResult(False, source_contract_error, rejected, None)
 
+        consistency_report = None
         if envelope.kind == "position":
-            consistency = self.consistency.assess_position(aligned, self.source_registry)
-            if not consistency.consistent:
+            consistency_report = self.consistency.assess_position(aligned, self.source_registry)
+            if not consistency_report.consistent:
                 rejected = TimeAlignmentResult(False, "cross_source_consistency_conflict", aligned)
                 return IngestResult(False, "cross_source_consistency_conflict", rejected, None)
 
@@ -223,7 +238,11 @@ class AMEPRuntime:
             self._finalize_measurement(envelope.source, aligned.timestamp_s, result)
             self.time_aligner.commit(aligned)
             if envelope.kind == "position" and result.accepted and result.fused:
-                self.consistency.commit_position(aligned, self.source_registry)
+                self.consistency.commit_position(
+                    aligned,
+                    self.source_registry,
+                    report=consistency_report,
+                )
         except (KeyError, ValueError, np.linalg.LinAlgError) as exc:
             reason = f"measurement_contract_rejected:{exc}"
             rejected = TimeAlignmentResult(False, reason, aligned)
