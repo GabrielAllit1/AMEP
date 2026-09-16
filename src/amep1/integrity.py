@@ -58,9 +58,10 @@ class IntegrityEngine:
 
     The engine explicitly distinguishes health from independence. Multiple
     healthy sources that share a declared failure domain do not receive multiple
-    units of resilience credit. Cross-source disagreement can remove navigation
-    authority, but this layer does not claim certified RAIM/FDE or a validated
-    protection level.
+    units of resilience credit. Only ONLINE absolute sources receive diversity
+    credit for the resilient-mode decision; DEGRADED sources may still contribute
+    to the estimator/coverage heuristic but do not establish high-confidence
+    source independence.
     """
 
     def __init__(
@@ -104,6 +105,11 @@ class IntegrityEngine:
         )
 
         active_absolute = coverage.active_absolute_sources
+        creditable_absolute = tuple(
+            source
+            for source in active_absolute
+            if sensor_health.get(source) == SensorHealth.ONLINE
+        )
         if source_registry is None:
             dependency_available = False
             abs_domains: tuple[str, ...] = ()
@@ -111,13 +117,13 @@ class IntegrityEngine:
             unregistered = tuple(active_absolute)
         else:
             unregistered = source_registry.unregistered(active_absolute)
-            dependency_available = not unregistered
+            dependency_available = bool(active_absolute) and not unregistered
             abs_domains = source_registry.failure_domains(
-                active_absolute,
+                creditable_absolute,
                 absolute_only=True,
             )
             non_gnss_domains = source_registry.failure_domains(
-                active_absolute,
+                creditable_absolute,
                 absolute_only=True,
                 non_gnss_only=True,
             )
@@ -174,10 +180,6 @@ class IntegrityEngine:
         if unregistered:
             reasons.append("active_absolute_source_missing_dependency_descriptor")
 
-        # AMEP-1 v1.0 demonstrated that the covariance-derived radius can be
-        # severely overconfident under correlated common-mode bias. Keep the
-        # protection-bound contract explicitly unavailable until a validated
-        # integrity architecture closes that evidence gap.
         return IntegrityReport(
             timestamp_s=timestamp_s,
             status=status,
