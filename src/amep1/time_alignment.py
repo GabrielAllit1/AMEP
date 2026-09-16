@@ -115,6 +115,9 @@ class TimeAligner:
     This initial implementation deliberately rejects delayed/out-of-order samples
     that the current real-time EKF cannot rewind for. A future fixed-lag smoother
     or delayed-state update can relax that policy without changing the envelope.
+
+    `align(..., commit=False)` provides a two-phase path for runtimes that must
+    finish frame/kind validation before advancing a source ordering watermark.
     """
 
     def __init__(self, policy: TimeAlignmentPolicy | None = None) -> None:
@@ -133,7 +136,20 @@ class TimeAligner:
             raise ValueError("clock-domain name must be non-empty")
         self._domains[name] = ClockDomain(offset_to_navigation_s, uncertainty_s)
 
-    def align(self, envelope: MeasurementEnvelope, *, now_s: float | None = None) -> TimeAlignmentResult:
+    def commit(self, measurement: AlignedMeasurement) -> None:
+        """Advance a source ordering watermark after downstream contract validation."""
+        source = measurement.envelope.source
+        last = self._last_timestamp_by_source.get(source)
+        if last is None or measurement.timestamp_s >= last:
+            self._last_timestamp_by_source[source] = float(measurement.timestamp_s)
+
+    def align(
+        self,
+        envelope: MeasurementEnvelope,
+        *,
+        now_s: float | None = None,
+        commit: bool = True,
+    ) -> TimeAlignmentResult:
         try:
             envelope.validate()
         except ValueError as exc:
@@ -168,16 +184,14 @@ class TimeAligner:
         if self.policy.reject_out_of_order and last is not None and timestamp_s < last:
             return TimeAlignmentResult(False, "out_of_order_measurement")
 
-        self._last_timestamp_by_source[envelope.source] = timestamp_s
         uncertainty_s = float(envelope.timestamp_uncertainty_s + domain.uncertainty_s)
-        return TimeAlignmentResult(
-            True,
-            "aligned",
-            AlignedMeasurement(
-                envelope=envelope,
-                timestamp_s=timestamp_s,
-                timestamp_uncertainty_s=uncertainty_s,
-                transport_latency_s=latency_s,
-                age_s=max(0.0, age_s),
-            ),
+        aligned = AlignedMeasurement(
+            envelope=envelope,
+            timestamp_s=timestamp_s,
+            timestamp_uncertainty_s=uncertainty_s,
+            transport_latency_s=latency_s,
+            age_s=max(0.0, age_s),
         )
+        if commit:
+            self.commit(aligned)
+        return TimeAlignmentResult(True, "aligned", aligned)
