@@ -145,7 +145,7 @@ class AMEPRuntime:
         radar, camera/LiDAR, DVL, and raw IMU adapters remain separate front-end
         responsibilities and must populate this normalized contract explicitly.
         """
-        alignment = self.time_aligner.align(envelope, now_s=now_s)
+        alignment = self.time_aligner.align(envelope, now_s=now_s, commit=False)
         if not alignment.accepted or alignment.measurement is None:
             return IngestResult(False, alignment.reason, alignment, None)
 
@@ -195,6 +195,7 @@ class AMEPRuntime:
                 allow_fusion=allow_fusion,
             )
             self._finalize_measurement(envelope.source, aligned.timestamp_s, result)
+            self.time_aligner.commit(aligned)
         except (KeyError, ValueError, np.linalg.LinAlgError) as exc:
             reason = f"measurement_contract_rejected:{exc}"
             rejected = TimeAlignmentResult(False, reason, aligned)
