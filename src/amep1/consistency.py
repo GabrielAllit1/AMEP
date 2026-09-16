@@ -16,6 +16,7 @@ class SourceConflict:
     source_b: str
     failure_domain_a: str
     failure_domain_b: str
+    frame: str
     nis: float
     threshold: float
     time_separation_s: float
@@ -52,18 +53,20 @@ class ConsistencyPolicy:
 class _AbsoluteObservation:
     source: str
     timestamp_s: float
+    frame: str
     value: np.ndarray
     covariance: np.ndarray
     failure_domain: str
+    integrity_dependencies: frozenset[str]
 
 
 class CrossSourceConsistencyMonitor:
-    """Near-synchronous consistency check across declared independent sources.
+    """Near-synchronous consistency check across dependency-disjoint sources.
 
-    Assessment and commit are separate so a contradictory absolute fix can be
-    rejected before it mutates either the estimator or the monitor history.
-    The latched report is changed only by a detected conflict or a successfully
-    committed observation; an EKF-rejected candidate cannot clear prior evidence.
+    Only observations in the same coordinate frame and with disjoint declared
+    integrity dependencies are compared. Assessment and commit are separate so a
+    contradiction is rejected before estimator mutation. Two-source disagreement
+    is integrity evidence, not enough information to identify the faulty source.
     """
 
     def __init__(self, policy: ConsistencyPolicy | None = None) -> None:
@@ -111,10 +114,16 @@ class CrossSourceConsistencyMonitor:
         conflicts: list[SourceConflict] = []
         checked = 0
         worst: float | None = None
+        dependencies = descriptor.integrity_dependencies
+
         for other in self._latest.values():
             if other.source == envelope.source:
                 continue
-            if other.failure_domain == descriptor.failure_domain:
+            if other.frame != envelope.frame:
+                continue
+            if other.integrity_dependencies.intersection(dependencies):
+                # Shared dependencies mean the observations cannot be treated as
+                # independent integrity evidence against each other.
                 continue
             separation = abs(aligned.timestamp_s - other.timestamp_s)
             if separation > self.policy.max_time_separation_s:
@@ -137,6 +146,7 @@ class CrossSourceConsistencyMonitor:
                         source_b=envelope.source,
                         failure_domain_a=other.failure_domain,
                         failure_domain_b=descriptor.failure_domain,
+                        frame=envelope.frame,
                         nis=nis,
                         threshold=threshold,
                         time_separation_s=separation,
@@ -146,9 +156,11 @@ class CrossSourceConsistencyMonitor:
         observation = _AbsoluteObservation(
             source=envelope.source,
             timestamp_s=aligned.timestamp_s,
+            frame=envelope.frame,
             value=value.copy(),
             covariance=covariance.copy(),
             failure_domain=descriptor.failure_domain,
+            integrity_dependencies=dependencies,
         )
         return observation, ConsistencyReport(
             checked_pairs=checked,
