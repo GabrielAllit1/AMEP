@@ -1,39 +1,69 @@
 # Architecture
 
-AMEP-1 is organized as a small, auditable navigation-estimation kernel with explicit supervision around the estimator. The design goal is not to hide uncertainty inside a monolithic autonomy stack; each layer has a narrow contract and a fail-closed relationship to the next layer.
+AMEP-1 is organized as a small, auditable navigation-estimation kernel with explicit contracts around the estimator. The design goal is not to hide uncertainty inside a monolithic autonomy stack; each layer has a narrow contract and a fail-closed relationship to the next layer.
 
 ## Data flow
 
 ```text
-preprocessed IMU / heading / velocity / absolute fixes
-                    │
-                    v
-             AMEPFilter (EKF)
-                    │
-          innovation / acceptance
-                    │
-                    v
-          SensorHealthManager
-                    │
-          healthy/degraded sources
-                    │
-                    v
-          ConstraintCoverage
-                    │
-          information-rank result
-                    │
-                    v
-          NavigationSupervisor
-                    │
-      navigation mode + authority gate
-                    │
-                    v
-      operator / autonomy / SAFE_HOLD
+GNSS / GPS ─┐
+IMU ────────┤
+Radar ──────┤
+DVL / STW ──┤
+Vision/LiDAR┤
+Alt-PNT ────┘
+      │
+      v
+MeasurementEnvelope
+source / kind / values / covariance / frame
+source timestamp / receive timestamp / clock domain
+provenance / timestamp uncertainty / metadata
+      │
+      v
+TimeAligner
+clock normalization / latency / age / order checks
+      │
+      v
+AMEPFilter (EKF)
+      │
+innovation / NIS / accepted-fused result
+      │
+      v
+SensorHealthManager + ConstraintCoverage
+      │
+      v
+IntegrityEngine
+      │
+IntegrityReport
+      │
+      v
+NavigationSupervisor
+NOMINAL / GPS_DENIED_RESILIENT /
+DEGRADED_DEAD_RECKONING / SAFE_HOLD
+      │
+      v
+PNTSolution
+position / velocity / heading / covariance
+source health / source age / integrity status
+containment proxy / protection-bound availability
 ```
 
 Communications supervision is intentionally orthogonal: `CommunicationsSupervisor` determines which command/telemetry link is healthy, and the authority layer uses link availability when deciding whether an operator command is actionable.
 
-## 1. Extended Kalman Filter
+## 1. Sensor and measurement contract
+
+`src/amep1/time_alignment.py` defines `MeasurementEnvelope`. It is the normalized boundary between real sensor adapters and the estimation kernel. The envelope preserves source identity, measurement family, values, full measurement covariance, coordinate frame, source timestamp, receive timestamp, clock domain, sequence/provenance metadata, and timestamp uncertainty.
+
+The current runtime accepts normalized local-ENU measurement products for absolute position, water-relative velocity, ground velocity, current prior, and heading. It does not pretend that raw GNSS messages, radar detections, camera/LiDAR observations, DVL packets, or raw accelerometer data are already estimator-ready. Those require explicit front-end adapters and calibration.
+
+## 2. Time alignment
+
+`TimeAligner` maps declared source clock domains into the navigation clock domain. The initial implementation rejects unknown clocks, excessive transport latency, excessive age, measurements from the future beyond tolerance, and out-of-order measurements.
+
+This is deliberately conservative. The current real-time EKF does not rewind state for delayed measurements. A future fixed-lag smoother, delayed-state filter, or factor-graph backend can relax that rule without changing the measurement envelope.
+
+Clock offsets in the current software are configured values, not a validated synchronization system. Production work still requires measured timestamp provenance, synchronization uncertainty, transport latency budgets, discontinuity handling, and target-interface evidence.
+
+## 3. Extended Kalman Filter
 
 `src/amep1/estimator.py` contains the reference seven-state horizontal EKF:
 
@@ -43,93 +73,89 @@ x = [E, N, Vw_E, Vw_N, C_E, C_N, psi]^T
 
 The deterministic propagation uses water-relative velocity plus estimated surface current for position propagation and rotates leveled forward/starboard acceleration into the local east/north plane. Because that rotation is nonlinear in heading, the covariance transition includes the heading derivatives of the acceleration terms.
 
-The current model deliberately stops short of a full strapdown marine INS. It has no roll/pitch states, accelerometer/gyro bias states, vertical channel, lever-arm states, clock states, or hydrodynamic model. Those belong in a calibrated front end or a future expanded state model.
-
-Measurement families are represented with explicit observation matrices:
-
-- absolute local position: `E,N`;
-- water-relative velocity: `Vw_E,Vw_N`;
-- ground velocity: `Vw + C`;
-- current prior: `C_E,C_N`;
-- heading: `psi`, with wrapped angular residual.
+The current model deliberately stops short of a full strapdown marine INS. It has no roll/pitch states, accelerometer/gyro bias states, vertical channel, lever-arm states, clock states, or hydrodynamic model. Raw IMU specific force must therefore pass through a calibrated attitude/INS front end before entering the existing `HorizontalIMUInput` contract.
 
 For each observation the estimator computes the innovation, innovation covariance, and normalized innovation squared (NIS). Measurements outside the configured chi-square gate are rejected. Accepted measurements use a Cholesky solve for the Kalman gain and a Joseph-form covariance update. Covariance is symmetrized and projected to a configured positive eigenvalue floor.
 
-## 2. Sensor integrity and health
+The normalized runtime path passes the envelope's full measurement covariance into this update rather than reducing every observation to a scalar sigma.
 
-`src/amep1/health.py` tracks per-source state as `UNKNOWN`, `ONLINE`, `DEGRADED`, `ISOLATED`, or `STALE`.
+## 4. Sensor health and local constraint coverage
 
-The current policy uses four mechanisms:
+`src/amep1/health.py` tracks per-source state as `UNKNOWN`, `ONLINE`, `DEGRADED`, `ISOLATED`, or `STALE`. Current health mechanisms are freshness, consecutive innovation rejection, sliding rejection fraction, manual isolation, and probe-only recovery. It also exposes source age-of-data for the PNT output contract.
 
-1. source freshness;
-2. consecutive innovation rejection;
-3. sliding rejection fraction;
-4. explicit manual isolation.
+`src/amep1/constraints.py` implements the local information-rank heuristic described by the AMEP research contract. Each registered source declares which reference-state indices it constrains. The result reports constrained-state rank, simple conditioning, active sources, and GNSS/non-GNSS absolute-source availability.
 
-An isolated source is not immediately trusted again. It can be evaluated in probe-only mode, where measurements are tested against the EKF but not fused. A configured sequence of accepted probes moves the source back toward usable status.
+Constraint rank is explicitly not nonlinear observability proof.
 
-This is fault supervision, not a complete spoofing classifier. NIS consistency is only consistency with the current state/covariance model.
+## 5. Integrity engine
 
-## 3. Constraint coverage
+`src/amep1/integrity.py` creates an explicit `IntegrityReport` between estimator/health state and navigation-mode authority. The current engine can declare `MONITORING`, `DEGRADED`, `UNAVAILABLE`, or `ALERT`, and it can prevent normal navigation authority when a latched runtime fault or insufficient navigation constraint rank exists.
 
-`src/amep1/constraints.py` implements the local information-rank heuristic described by the AMEP research contract. Each registered source declares which state indices it constrains and an information weight. Healthy or degraded sources contribute to a diagonalized information approximation.
+This is an architectural integrity contract, not a certified RAIM/FDE implementation. Production-facing work still requires source-dependence/common-cause assumptions, fault hypotheses, solution separation or equivalent detection/exclusion logic, RF-health correlation where appropriate, false-alarm/missed-detection characterization, and recorded/HIL/field evidence.
 
-The result reports:
+Most importantly, the engine deliberately reports:
 
-- number of locally constrained state dimensions;
-- a simple conditioning metric;
-- healthy source names;
-- active absolute-position sources;
-- whether healthy GNSS is present;
-- whether a healthy non-GNSS absolute source is present.
+```text
+horizontal_protection_bound_m = None
+protection_bound_validated = False
+```
 
-This mechanism is deliberately not called nonlinear observability. A full observability analysis would require the actual nonlinear dynamics and measurement Jacobians over a trajectory, including any future bias states.
+AMEP-1 v1.0 demonstrated severe covariance overconfidence under correlated common-mode position bias. The covariance-derived containment proxy therefore remains visible as a diagnostic but is not relabeled as a protection level.
 
-## 4. Navigation modes
+## 6. Navigation modes and command authority
 
-`src/amep1/authority.py` maps the coverage result into deterministic modes:
+`src/amep1/authority.py` maps constraint coverage into deterministic navigation modes only after the integrity report permits navigation:
 
 - `NOMINAL`: full reference-state coverage with healthy GNSS;
 - `GPS_DENIED_RESILIENT`: full reference-state coverage with a healthy non-GNSS absolute-position source;
 - `DEGRADED_DEAD_RECKONING`: partial but nontrivial constraint coverage;
-- `SAFE_HOLD`: insufficient navigation constraints or a latched hard runtime fault.
+- `SAFE_HOLD`: integrity veto, insufficient navigation constraints, or a latched hard runtime fault.
 
-The default thresholds are policy, not certification limits.
+The default thresholds are research policy, not certification limits.
 
-## 5. Command authority
+Command authority remains separate: valid operator command over a healthy link has priority; autonomy is permitted only in `NOMINAL` or `GPS_DENIED_RESILIENT`; otherwise safety authority returns no autonomous helm command. `SAFE_HOLD` is a supervisory contract, not a validated physical station-keeping or propulsion behavior.
 
-AMEP separates navigation confidence from command authority. The supervisor applies the following ordering:
+## 7. PNT solution contract
 
-1. valid operator command over a healthy command link;
-2. autonomy command only when navigation mode is `NOMINAL` or `GPS_DENIED_RESILIENT`;
-3. otherwise safety authority with no autonomous helm command.
+`src/amep1/solution.py` defines `PNTSolution`. It exposes the current horizontal state and supervision evidence without implying unsupported capability:
 
-`SAFE_HOLD` is a supervisory contract only. It does not itself implement station keeping, propulsion shutdown, collision avoidance, or a vessel-specific safe maneuver.
+- position;
+- water-relative and ground velocity;
+- estimated surface current;
+- heading;
+- full state covariance;
+- covariance-derived 95% containment proxy;
+- integrity status/report;
+- source health and age-of-data;
+- constraint rank and active absolute sources;
+- degradation/navigation mode;
+- explicit protection-bound availability.
 
-## 6. Runtime integration
+Attitude and validated navigation time are marked unavailable because the current seven-state estimator does not produce them. A future strapdown INS/time solution can extend the contract when those states and their evidence exist.
 
-`src/amep1/runtime.py` is the façade intended for an adapter/integration layer. It owns no hardware transport. It performs three important orchestration functions:
+## 8. Runtime integration
 
-- routes each accepted/rejected measurement result into source health;
-- recomputes constraint coverage and navigation mode for status reporting;
-- latches invalid IMU/timebase prediction failures into `SAFE_HOLD` until explicitly cleared after the root cause is corrected.
+`src/amep1/runtime.py` is the façade intended for an adapter/integration layer. Existing `predict()`, `update_*()`, and `status()` calls remain available. The new `ingest_measurement()` path performs time alignment, frame/kind validation, full-covariance estimator update, innovation screening, source-health accounting, and typed ingest reporting. `integrity_report()` and `pnt_solution()` expose the downstream contracts.
 
-## 7. Communications and timing
+Invalid prediction/timebase inputs still latch a hard fault and force `SAFE_HOLD` until the root cause is corrected and explicitly cleared.
+
+## 9. Communications and deadline timing
 
 `src/amep1/comms.py` implements deterministic priority/freshness selection among generic links. It does not implement RF, networking, cryptography, modem control, or transport protocols.
 
 `src/amep1/timing.py` implements a host-SIL deadline observer. It detects non-monotonic time and periods longer than a declared deadline, but it is not evidence of worst-case execution time or scheduling determinism on target hardware.
 
-## 8. Intended denial-zone evolution
+## 10. Intended denial-zone evolution
 
-The current architecture provides the correct seams for a more complete GNSS-denial stack without forcing those concerns into one estimator class. Likely production-facing additions include:
+The current architecture now has stable seams for the next production-facing research tranches:
 
-- calibrated INS/attitude mechanization and inertial bias states;
-- radar/coastline or radar-SLAM absolute/relative aiding;
-- bathymetric terrain-aided navigation;
-- visual map localization where environmental conditions permit;
-- explicit clock, latency, lever-arm, boresight, and datum handling;
-- source-dependence/common-cause models and solution-separation or multi-hypothesis integrity logic;
-- replay adapters, vessel-bus adapters, HIL interfaces, and target-hardware watchdog integration.
+- calibrated strapdown INS/ESKF front end with attitude and inertial bias handling;
+- measured clock synchronization, timestamp uncertainty, lever-arm, boresight, frame, and datum calibration;
+- real radar/coastline, bathymetric, visual/LiDAR, DVL/STW, and GNSS/RF-health adapters;
+- common-cause integrity logic, fault detection/exclusion, and defensible protection/integrity bounds;
+- optional factor-graph/fixed-lag smoothing for delayed/asynchronous constraints, replay, and calibration rather than replacing the deterministic real-time filter by default;
+- recorded maritime replay against strong same-sensor baselines;
+- target-hardware WCET/jitter and watchdog evidence;
+- HIL fault injection and controlled water trials.
 
-Each addition should preserve the current rule: estimation, health, integrity assumptions, navigation authority, and actuator behavior remain separately testable.
+Each addition must preserve the current rule: sensor preprocessing, time alignment, estimation, integrity assumptions, mode authority, and actuator behavior remain separately testable and negative findings remain part of the evidence record.

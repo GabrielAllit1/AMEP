@@ -1,0 +1,36 @@
+AMEP PNT backbone validation snapshot
+Date: 2026-09-16
+Branch: feat/pnt-integrity-backbone
+Code/test head validated: d410a623944e8ee18730e4cdd42f1155b433250c
+Environment: scratch reconstruction from GitHub branch contents
+Python: 3.13.5
+
+Commands:
+  PYTHONPATH=<scratch>/src python -m compileall -q <scratch>/src <scratch>/tests
+  PYTHONPATH=<scratch>/src pytest -q <scratch>/tests
+
+Result:
+  compileall: PASS
+  pytest: 27 passed in 0.63s
+
+Coverage represented by the test inventory:
+  - existing estimator contracts
+  - existing health/supervision contracts
+  - existing communications/watchdog/runtime contracts
+  - time-domain normalization and timestamp uncertainty propagation
+  - out-of-order and unknown-clock fail-closed behavior
+  - rejected measurement contracts do not poison the source-ordering watermark
+  - normalized full-covariance measurement fusion
+  - integrity veto on insufficient navigation constraints
+  - full-rank nominal mode through the normalized ingestion path
+  - PNTSolution covariance/source-age/integrity fields
+  - explicit absence of a validated protection bound
+
+GitHub Actions note:
+  PR workflow run 35089273121 failed before runner assignment and executed zero steps.
+  The two preceding main-branch CI runs were already failing at the workflow/runner layer.
+  Therefore the GitHub Actions conclusion is not treated as code-test evidence for this tranche.
+
+Evidence boundary:
+  This is software validation only. It is not recorded maritime replay, HIL, target-hardware timing,
+  water-trial evidence, certified integrity/FDE/RAIM evidence, or a validated protection level.

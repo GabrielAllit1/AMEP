@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from .enums import AuthoritySource, NavMode
 from .types import AuthorityDecision, CoverageResult
+
+if TYPE_CHECKING:
+    from .integrity import IntegrityReport
 
 
 @dataclass(frozen=True)
@@ -24,7 +27,17 @@ class NavigationSupervisor:
         self.reason = reason
         return self.mode
 
-    def update(self, coverage: CoverageResult) -> NavMode:
+    def update(
+        self,
+        coverage: CoverageResult,
+        integrity: IntegrityReport | None = None,
+    ) -> NavMode:
+        if integrity is not None and not integrity.navigation_permitted:
+            self.mode = NavMode.SAFE_HOLD
+            detail = integrity.reasons[0] if integrity.reasons else integrity.status.value
+            self.reason = f"integrity_blocked:{detail}"
+            return self.mode
+
         rank = coverage.information_rank
         if rank >= self.policy.full_rank and coverage.has_healthy_gnss:
             self.mode = NavMode.NOMINAL
