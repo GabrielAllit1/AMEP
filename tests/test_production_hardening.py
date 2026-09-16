@@ -7,7 +7,6 @@ from amep1 import (
     DeterministicReplay,
     EstimatorBackend,
     EvidenceLog,
-    EvidenceRecord,
     HorizontalIMUInput,
     IntegrityStatus,
     MeasurementEnvelope,
@@ -51,30 +50,60 @@ def test_amep_filter_satisfies_backend_portability_contract():
     assert isinstance(AMEPFilter(), EstimatorBackend)
 
 
-def test_failure_domains_do_not_double_count_shared_dependency():
+def test_failure_domains_do_not_double_count_shared_primary_chain():
     registry = SourceRegistry()
     registry.register(SourceDescriptor("a", SourceClass.ABSOLUTE_POSITION, "shared", absolute_position=True))
     registry.register(SourceDescriptor("b", SourceClass.ABSOLUTE_POSITION, "shared", absolute_position=True))
     assert registry.failure_domains(("a", "b"), absolute_only=True) == ("shared",)
+    assert registry.maximum_independent_count(("a", "b"), absolute_only=True) == 1
 
 
-def test_single_non_gnss_absolute_domain_cannot_claim_resilient_mode():
+def test_shared_secondary_dependency_prevents_false_independence_credit():
+    registry = SourceRegistry()
+    registry.register(
+        SourceDescriptor(
+            "radar",
+            SourceClass.ABSOLUTE_POSITION,
+            "radar_chain",
+            absolute_position=True,
+            dependencies=("shared_clock",),
+        )
+    )
+    registry.register(
+        SourceDescriptor(
+            "vision",
+            SourceClass.ABSOLUTE_POSITION,
+            "vision_chain",
+            absolute_position=True,
+            dependencies=("shared_clock",),
+        )
+    )
+    assert set(registry.failure_domains(("radar", "vision"), absolute_only=True)) == {
+        "radar_chain",
+        "vision_chain",
+    }
+    assert registry.maximum_independent_count(("radar", "vision"), absolute_only=True) == 1
+
+
+def test_single_non_gnss_absolute_source_cannot_claim_resilient_mode():
     rt = build_reference_runtime()
     seed_non_gnss_full_rank(rt, include_visual=False)
     solution = rt.pnt_solution(now_s=1.10)
     assert solution.information_rank == 7
     assert solution.mode == NavMode.DEGRADED_DEAD_RECKONING
     assert not solution.integrity.resilient_navigation_permitted
-    assert "insufficient_declared_independent_non_gnss_absolute_domains" in solution.integrity.reasons
+    assert solution.integrity.independent_non_gnss_absolute_sources == 1
+    assert "insufficient_dependency_disjoint_non_gnss_absolute_sources" in solution.integrity.reasons
 
 
-def test_two_declared_independent_non_gnss_domains_enable_resilient_mode():
+def test_two_dependency_disjoint_non_gnss_sources_enable_resilient_mode():
     rt = build_reference_runtime()
     seed_non_gnss_full_rank(rt, include_visual=True)
     solution = rt.pnt_solution(now_s=1.10)
     assert solution.information_rank == 7
     assert solution.mode == NavMode.GPS_DENIED_RESILIENT
     assert solution.integrity.resilient_navigation_permitted
+    assert solution.integrity.independent_non_gnss_absolute_sources == 2
     assert len(solution.integrity.declared_non_gnss_absolute_failure_domains) == 2
 
 
@@ -96,11 +125,11 @@ def test_independent_absolute_conflict_is_blocked_before_fusion_and_alerts():
 
 def test_reference_registry_declares_distinct_absolute_failure_domains():
     registry = build_reference_source_registry()
-    domains = registry.failure_domains(
-        ("gnss", "radar_map_fix", "bathy_map_fix", "visual_map_fix"),
-        absolute_only=True,
-    )
+    sources = ("gnss", "radar_map_fix", "bathy_map_fix", "visual_map_fix")
+    domains = registry.failure_domains(sources, absolute_only=True)
     assert len(domains) == 4
+    assert registry.maximum_independent_count(sources, absolute_only=True) == 4
+    assert len(registry.fingerprint()) == 64
 
 
 def test_evidence_log_hash_chain_detects_tamper():
