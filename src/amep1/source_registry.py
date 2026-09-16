@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
+import itertools
 import json
 from typing import Iterable, Mapping
 
@@ -22,12 +23,12 @@ class SourceClass(str, Enum):
 
 @dataclass(frozen=True)
 class SourceDescriptor:
-    """Declared integration metadata for one navigation source.
+    """Declared integration and common-cause metadata for one source.
 
-    ``failure_domain`` is an engineering declaration used to avoid giving
-    multiple measurements from a shared dependency false independence credit.
-    It is not proof that two differently named domains are statistically or
-    physically independent; that still requires system analysis and evidence.
+    ``failure_domain`` names the source's primary measurement-generation chain.
+    ``dependencies`` can declare additional shared integrity dependencies such as
+    a common clock, map, preprocessing service, receiver, or other common cause.
+    Different labels are engineering declarations, not proof of independence.
     """
 
     name: str
@@ -39,6 +40,7 @@ class SourceDescriptor:
     clock_domain: str = "navigation"
     provenance_required: bool = False
     max_timestamp_uncertainty_s: float | None = None
+    dependencies: tuple[str, ...] = ()
     attributes: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -48,14 +50,20 @@ class SourceDescriptor:
             raise ValueError("failure_domain must be non-empty")
         if not self.clock_domain:
             raise ValueError("clock_domain must be non-empty")
+        if any(not dependency for dependency in self.dependencies):
+            raise ValueError("dependency names must be non-empty")
         if self.max_timestamp_uncertainty_s is not None and self.max_timestamp_uncertainty_s < 0:
             raise ValueError("max_timestamp_uncertainty_s must be >= 0")
         if self.gnss and not self.absolute_position:
             raise ValueError("GNSS source must declare absolute_position=True")
 
+    @property
+    def integrity_dependencies(self) -> frozenset[str]:
+        return frozenset((self.failure_domain, *self.dependencies))
+
 
 class SourceRegistry:
-    """MOSA-style registry separating sensor identity from estimator logic."""
+    """MOSA-style registry separating source identity/dependencies from estimation."""
 
     def __init__(self) -> None:
         self._sources: dict[str, SourceDescriptor] = {}
@@ -90,6 +98,7 @@ class SourceRegistry:
                 "clock_domain": descriptor.clock_domain,
                 "provenance_required": descriptor.provenance_required,
                 "max_timestamp_uncertainty_s": descriptor.max_timestamp_uncertainty_s,
+                "dependencies": sorted(descriptor.dependencies),
                 "attributes": dict(sorted(descriptor.attributes.items())),
             }
             for descriptor in self.descriptors()
@@ -97,15 +106,15 @@ class SourceRegistry:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    def failure_domains(
+    def _eligible(
         self,
         sources: Iterable[str],
         *,
-        absolute_only: bool = False,
-        safety_credit_only: bool = True,
-        non_gnss_only: bool = False,
-    ) -> tuple[str, ...]:
-        domains: set[str] = set()
+        absolute_only: bool,
+        safety_credit_only: bool,
+        non_gnss_only: bool,
+    ) -> tuple[SourceDescriptor, ...]:
+        eligible: list[SourceDescriptor] = []
         for source in sources:
             descriptor = self._sources.get(source)
             if descriptor is None:
@@ -116,8 +125,57 @@ class SourceRegistry:
                 continue
             if non_gnss_only and descriptor.gnss:
                 continue
-            domains.add(descriptor.failure_domain)
-        return tuple(sorted(domains))
+            eligible.append(descriptor)
+        return tuple(eligible)
+
+    def failure_domains(
+        self,
+        sources: Iterable[str],
+        *,
+        absolute_only: bool = False,
+        safety_credit_only: bool = True,
+        non_gnss_only: bool = False,
+    ) -> tuple[str, ...]:
+        descriptors = self._eligible(
+            sources,
+            absolute_only=absolute_only,
+            safety_credit_only=safety_credit_only,
+            non_gnss_only=non_gnss_only,
+        )
+        return tuple(sorted({descriptor.failure_domain for descriptor in descriptors}))
+
+    def maximum_independent_count(
+        self,
+        sources: Iterable[str],
+        *,
+        absolute_only: bool = False,
+        safety_credit_only: bool = True,
+        non_gnss_only: bool = False,
+    ) -> int:
+        """Return the largest pairwise dependency-disjoint source subset.
+
+        Source sets are small in PNT integration, so an exhaustive subset search
+        is deterministic, auditable, and preferable here to an opaque heuristic.
+        """
+        descriptors = self._eligible(
+            sources,
+            absolute_only=absolute_only,
+            safety_credit_only=safety_credit_only,
+            non_gnss_only=non_gnss_only,
+        )
+        for size in range(len(descriptors), 0, -1):
+            for subset in itertools.combinations(descriptors, size):
+                occupied: set[str] = set()
+                independent = True
+                for descriptor in subset:
+                    deps = set(descriptor.integrity_dependencies)
+                    if occupied.intersection(deps):
+                        independent = False
+                        break
+                    occupied.update(deps)
+                if independent:
+                    return size
+        return 0
 
     def unregistered(self, sources: Iterable[str]) -> tuple[str, ...]:
         return tuple(sorted(source for source in sources if source not in self._sources))
