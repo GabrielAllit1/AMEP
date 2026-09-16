@@ -15,7 +15,7 @@ from .integrity import IntegrityEngine, IntegrityReport
 from .solution import PNTSolution
 from .source_registry import SourceClass, SourceRegistry
 from .time_alignment import IngestResult, MeasurementEnvelope, TimeAligner, TimeAlignmentResult
-from .types import HorizontalIMUInput, MeasurementResult, NavigationStatus
+from .types import MeasurementResult, NavigationStatus
 
 
 @dataclass
@@ -199,6 +199,13 @@ class AMEPRuntime:
             return IngestResult(False, alignment.reason, alignment, None)
 
         aligned = alignment.measurement
+        if envelope.kind not in self.estimator.measurement_kinds:
+            rejected = TimeAlignmentResult(False, "unsupported_measurement_kind", aligned)
+            return IngestResult(False, "unsupported_measurement_kind", rejected, None)
+        if envelope.frame not in self.estimator.accepted_frames:
+            rejected = TimeAlignmentResult(False, "unsupported_frame", aligned)
+            return IngestResult(False, "unsupported_frame", rejected, None)
+
         source_contract_error = self._source_contract_error(
             envelope, aligned.timestamp_uncertainty_s
         )
