@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import hashlib
+import json
 from typing import Iterable, Mapping
 
 
@@ -74,6 +76,26 @@ class SourceRegistry:
 
     def descriptors(self) -> tuple[SourceDescriptor, ...]:
         return tuple(self._sources[name] for name in sorted(self._sources))
+
+    def fingerprint(self) -> str:
+        """Stable SHA-256 fingerprint of the declared source dependency model."""
+        payload = [
+            {
+                "name": descriptor.name,
+                "source_class": descriptor.source_class.value,
+                "failure_domain": descriptor.failure_domain,
+                "absolute_position": descriptor.absolute_position,
+                "gnss": descriptor.gnss,
+                "safety_credit": descriptor.safety_credit,
+                "clock_domain": descriptor.clock_domain,
+                "provenance_required": descriptor.provenance_required,
+                "max_timestamp_uncertainty_s": descriptor.max_timestamp_uncertainty_s,
+                "attributes": dict(sorted(descriptor.attributes.items())),
+            }
+            for descriptor in self.descriptors()
+        ]
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def failure_domains(
         self,
