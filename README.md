@@ -71,7 +71,7 @@ The IMU contract is strict: `HorizontalIMUInput` accepts only leveled, gravity-c
 
 `MeasurementEnvelope` is the normalized boundary between sensor adapters and estimator fusion. It preserves source identity, measurement kind, values, full measurement covariance, coordinate frame, source timestamp, receive timestamp, clock domain, provenance, and timestamp uncertainty.
 
-`TimeAligner` currently performs explicit clock-domain normalization and rejects unknown clock domains, excessive latency/age, future-dated measurements beyond tolerance, and out-of-order measurements. The current real-time EKF does not rewind for delayed measurements; a future fixed-lag smoother or factor graph can consume the same envelope without silently changing the real-time estimator contract.
+`TimeAligner` currently performs explicit clock-domain normalization and rejects unknown clock domains, excessive latency/age, future-dated measurements beyond tolerance, and out-of-order measurements. Runtime ingestion uses a two-phase align/commit path so a malformed frame or measurement contract cannot poison the source-ordering watermark. The current real-time EKF does not rewind for delayed measurements; a future fixed-lag smoother or factor graph can consume the same envelope without silently changing the real-time estimator contract.
 
 The normalized runtime currently accepts local-ENU position, water velocity, ground velocity, current prior, and heading measurements. Raw GNSS, radar, camera/LiDAR, DVL/STW, RF-health, and vessel-bus interfaces still require real calibrated adapters.
 
@@ -142,11 +142,11 @@ python -m compileall -q src tests examples
 pytest
 ```
 
-The repository includes a GitHub Actions definition for Python 3.11. At the time of the PNT-backbone integration, GitHub jobs were failing before runner assignment, so those workflow failures are infrastructure state rather than executed test failures. The branch was separately reconstructed in a scratch Python environment and the source compiled with the full repository test inventory passing 26/26; this is software validation only, not operational PNT evidence.
+The repository includes a GitHub Actions definition for Python 3.11. At the time of the PNT-backbone integration, GitHub jobs were failing before runner assignment, so those workflow failures are infrastructure state rather than executed test failures. The branch was separately reconstructed in a scratch Python environment and the source compiled with the full repository test inventory passing 27/27; this is software validation only, not operational PNT evidence.
 
 ## Current evidence boundary
 
-The software baseline has unit/integration coverage for EKF propagation and updates, covariance stability, gross-outlier rejection, source isolation/recovery, freshness, constraint-rank modes, communications failover, watchdog behavior, fail-closed runtime behavior, clock-domain normalization, out-of-order rejection, full-covariance normalized measurement ingestion, explicit integrity veto, and rich PNT output semantics.
+The software baseline has unit/integration coverage for EKF propagation and updates, covariance stability, gross-outlier rejection, source isolation/recovery, freshness, constraint-rank modes, communications failover, watchdog behavior, fail-closed runtime behavior, clock-domain normalization, out-of-order rejection, two-phase source-time watermarking, full-covariance normalized measurement ingestion, explicit integrity veto, and rich PNT output semantics.
 
 The following remain open before AMEP can legitimately be called deployable GNSS-denial navigation:
 
