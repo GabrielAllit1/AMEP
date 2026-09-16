@@ -104,3 +104,11 @@ class SensorHealthManager:
 
     def states(self) -> dict[str, SensorHealth]:
         return {name: rec.state for name, rec in self._records.items()}
+
+    def source_ages(self, now_s: float) -> dict[str, float | None]:
+        """Return age-of-data for every registered source in navigation-clock seconds."""
+        now = float(now_s)
+        return {
+            name: None if rec.last_seen_s is None else max(0.0, now - rec.last_seen_s)
+            for name, rec in self._records.items()
+        }
