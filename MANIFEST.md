@@ -58,6 +58,7 @@ This manifest describes every authoritative source, test, example, and project-s
 | `docs/GNSS_DENIAL.md` | Defines the active GNSS-denial engineering objective, how the current EKF stack behaves through outage/jamming, what it can reject, what spoofing/common-mode failures remain, and the staged validation path. |
 | `docs/VALIDATION.md` | Summarizes current software evidence and explicitly separates software tests from recorded-data/HIL/water-trial evidence. |
 | `docs/validation/TEST_RESULTS.txt` | Preserved validation snapshot from the pre-normalization package: 21 software tests passed and source/tests compiled. Historical software evidence only. |
+| `docs/validation/PNT_BACKBONE_TEST_RESULTS.txt` | PNT-backbone scratch-validation snapshot: source/tests compiled and the 26-test repository inventory passed; records the no-runner GitHub Actions limitation and the software-only evidence boundary. |
 
 ## `.github/workflows/`
 
