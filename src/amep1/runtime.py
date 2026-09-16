@@ -154,12 +154,19 @@ class AMEPRuntime:
             rejected = TimeAlignmentResult(False, "unsupported_frame", aligned)
             return IngestResult(False, "unsupported_frame", rejected, None)
 
-        kind_models: dict[str, tuple[int, tuple[int, ...], tuple[tuple[int, float], ...]]] = {
-            "position": (2, (), ((0, 1.0), (8, 1.0))),
-            "water_velocity": (2, (), ((2, 1.0), (10, 1.0))),
-            "ground_velocity": (2, (), ((2, 1.0), (4, 1.0), (10, 1.0), (12, 1.0))),
-            "current_prior": (2, (), ((4, 1.0), (12, 1.0))),
-            "heading": (1, (0,), ((6, 1.0),)),
+        kind_models: dict[
+            str,
+            tuple[int, tuple[int, ...], tuple[tuple[int, int, float], ...]],
+        ] = {
+            "position": (2, (), ((0, 0, 1.0), (1, 1, 1.0))),
+            "water_velocity": (2, (), ((0, 2, 1.0), (1, 3, 1.0))),
+            "ground_velocity": (
+                2,
+                (),
+                ((0, 2, 1.0), (0, 4, 1.0), (1, 3, 1.0), (1, 5, 1.0)),
+            ),
+            "current_prior": (2, (), ((0, 4, 1.0), (1, 5, 1.0))),
+            "heading": (1, (0,), ((0, 6, 1.0),)),
         }
         model = kind_models.get(envelope.kind)
         if model is None:
@@ -172,8 +179,7 @@ class AMEPRuntime:
             return IngestResult(False, "measurement_dimension_mismatch", rejected, None)
 
         H = np.zeros((dimension, 7), dtype=float)
-        for flat_index, value in entries:
-            row, col = divmod(flat_index, 8)
+        for row, col, value in entries:
             H[row, col] = value
         R = np.asarray(envelope.covariance, dtype=float)
         z = np.asarray(envelope.values, dtype=float)
@@ -245,10 +251,7 @@ class AMEPRuntime:
         status = self.status(now_s)
         integrity = self.integrity_report(now_s)
         x = self.estimator.x
-        covariance = tuple(
-            tuple(float(v) for v in row)
-            for row in self.estimator.P
-        )
+        covariance = tuple(tuple(float(v) for v in row) for row in self.estimator.P)
         if status.timestamp_s is None:
             source_age_s = {name: None for name in self.health.states()}
         else:
