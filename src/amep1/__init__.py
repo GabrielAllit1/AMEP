@@ -1,7 +1,7 @@
 from .authority import NavigationPolicy, NavigationSupervisor
 from .backend import DelayedMeasurementBackend, EstimatorBackend
 from .comms import CommunicationsSupervisor, LinkPolicy
-from .config import EstimatorConfig, ProcessNoiseConfig, SourcePolicy
+from .config import EstimatorConfig, ProcessNoiseConfig, RuntimePolicy, SourcePolicy
 from .consistency import (
     ConsistencyPolicy,
     ConsistencyReport,
@@ -75,6 +75,7 @@ __all__ = [
     "ReplayIMUEvent",
     "ReplayMeasurementEvent",
     "ReplayResult",
+    "RuntimePolicy",
     "SensorHealth",
     "SensorHealthManager",
     "SourceClass",
