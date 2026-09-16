@@ -9,23 +9,27 @@ from .integrity import IntegrityReport, IntegrityStatus
 
 @dataclass(frozen=True)
 class PNTSolution:
-    """Evidence-bounded AMEP navigation output contract.
+    """Evidence-bounded navigation output contract.
 
-    Attitude and validated navigation time are not produced by the current
-    seven-state horizontal estimator, and no validated protection bound exists.
-    Those absences are represented explicitly instead of inferred by consumers.
+    ``frame`` is explicit and estimator-specific optional quantities remain
+    nullable. The current maritime estimator supplies water-relative velocity and
+    surface current; another platform backend need not invent those states.
+    Attitude, validated navigation time, and a validated protection bound are
+    still represented explicitly as unavailable when the backend cannot support
+    them with evidence.
     """
 
     timestamp_s: float | None
     mode: NavMode
+    frame: str
     east_m: float
     north_m: float
     ground_velocity_e_mps: float
     ground_velocity_n_mps: float
-    water_velocity_e_mps: float
-    water_velocity_n_mps: float
-    current_e_mps: float
-    current_n_mps: float
+    water_velocity_e_mps: float | None
+    water_velocity_n_mps: float | None
+    current_e_mps: float | None
+    current_n_mps: float | None
     heading_rad: float
     covariance: tuple[tuple[float, ...], ...]
     containment_proxy_95_m: float
