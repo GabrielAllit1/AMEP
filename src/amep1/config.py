@@ -32,6 +32,19 @@ class EstimatorConfig:
 
 
 @dataclass(frozen=True)
+class RuntimePolicy:
+    """Runtime assurance switches that do not alter estimator mathematics.
+
+    ``allow_legacy_direct_updates`` exists only for backward compatibility with
+    pre-envelope integrations and unit tests. Production-oriented profiles should
+    set it to False so every measurement must pass timing, provenance, dependency,
+    and pre-fusion consistency checks through ``ingest_measurement``.
+    """
+
+    allow_legacy_direct_updates: bool = True
+
+
+@dataclass(frozen=True)
 class SourcePolicy:
     max_age_s: float
     isolate_after_consecutive_rejections: int = 3
