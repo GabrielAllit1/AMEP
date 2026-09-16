@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .config import SourcePolicy
+from .config import RuntimePolicy, SourcePolicy
 from .constraints import ConstraintCoverage, ConstraintSpec
 from .health import SensorHealthManager
 from .source_registry import SourceClass, SourceDescriptor, SourceRegistry
@@ -77,7 +77,13 @@ def build_reference_source_registry() -> SourceRegistry:
 
 
 def build_reference_runtime():
-    """Construct the reference runtime with health, coverage, and dependency metadata."""
+    """Construct the assured reference runtime.
+
+    The reference integration disables legacy direct measurement updates so all
+    measurements must pass the normalized time/provenance/dependency/integrity
+    path. Callers that explicitly need compatibility behavior can instantiate
+    ``AMEPRuntime`` directly with the default ``RuntimePolicy``.
+    """
     from .estimator import AMEPFilter
     from .runtime import AMEPRuntime
 
@@ -87,4 +93,5 @@ def build_reference_runtime():
         health,
         coverage,
         source_registry=build_reference_source_registry(),
+        runtime_policy=RuntimePolicy(allow_legacy_direct_updates=False),
     )
