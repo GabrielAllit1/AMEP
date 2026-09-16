@@ -1,9 +1,11 @@
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from amep1 import (
     AMEPFilter,
+    AMEPRuntime,
     DeterministicReplay,
     EstimatorBackend,
     EvidenceLog,
@@ -16,6 +18,7 @@ from amep1 import (
     SourceClass,
     SourceDescriptor,
     SourceRegistry,
+    build_reference_health_and_constraints,
     build_reference_runtime,
     build_reference_source_registry,
 )
@@ -48,6 +51,18 @@ def seed_non_gnss_full_rank(rt, *, include_visual=False):
 
 def test_amep_filter_satisfies_backend_portability_contract():
     assert isinstance(AMEPFilter(), EstimatorBackend)
+
+
+def test_assured_reference_runtime_blocks_legacy_measurement_bypass():
+    rt = build_reference_runtime()
+    with pytest.raises(RuntimeError, match="legacy direct measurement updates are disabled"):
+        rt.update_position(timestamp_s=1.0, source="gnss", E=0.0, N=0.0, sigma=1.0)
+
+    health, coverage = build_reference_health_and_constraints()
+    compatibility = AMEPRuntime(AMEPFilter(), health, coverage)
+    assert compatibility.update_position(
+        timestamp_s=1.0, source="gnss", E=0.0, N=0.0, sigma=1.0
+    ).accepted
 
 
 def test_failure_domains_do_not_double_count_shared_primary_chain():
