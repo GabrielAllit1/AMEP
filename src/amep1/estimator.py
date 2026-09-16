@@ -32,6 +32,11 @@ class AMEPFilter:
     x: np.ndarray = field(default_factory=lambda: np.zeros(7, dtype=float))
     P: np.ndarray = field(default_factory=lambda: np.eye(7, dtype=float) * 10.0)
     last_t: float | None = None
+    measurement_kinds: tuple[str, ...] = field(
+        init=False,
+        default=("position", "water_velocity", "ground_velocity", "current_prior", "heading"),
+    )
+    accepted_frames: tuple[str, ...] = field(init=False, default=("local_ENU",))
 
     def __post_init__(self) -> None:
         self.x = np.asarray(self.x, dtype=float).reshape(7)
@@ -214,8 +219,10 @@ class AMEPFilter:
         allow_fusion: bool = True,
     ) -> MeasurementResult:
         """Apply one semantic measurement without exposing the 7-state layout."""
-        del metadata  # Reserved for future AMEP measurement-model extensions.
-        if frame != "local_ENU":
+        del metadata
+        if kind not in self.measurement_kinds:
+            raise ValueError(f"unsupported AMEPFilter measurement kind: {kind}")
+        if frame not in self.accepted_frames:
             raise ValueError(f"AMEPFilter requires local_ENU measurements, got {frame}")
         models: dict[
             str,
@@ -231,10 +238,7 @@ class AMEPFilter:
             "current_prior": (2, (), ((0, 4, 1.0), (1, 5, 1.0))),
             "heading": (1, (0,), ((0, 6, 1.0),)),
         }
-        model = models.get(kind)
-        if model is None:
-            raise ValueError(f"unsupported AMEPFilter measurement kind: {kind}")
-        dimension, angle_rows, entries = model
+        dimension, angle_rows, entries = models[kind]
         z = np.asarray(values, dtype=float).reshape(-1)
         if z.size != dimension:
             raise ValueError(
