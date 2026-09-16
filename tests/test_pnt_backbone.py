@@ -72,6 +72,21 @@ def test_unknown_clock_domain_fails_closed_before_fusion():
     assert result.measurement_result is None
 
 
+def test_rejected_contract_does_not_advance_source_time_watermark():
+    health, coverage = build_reference_health_and_constraints()
+    rt = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
+
+    malformed = envelope("gnss", "not_a_measurement_kind", 2.0, (0.0, 0.0), 1.0)
+    rejected = rt.ingest_measurement(malformed)
+    assert not rejected.accepted
+    assert rejected.reason == "unsupported_measurement_kind"
+
+    valid_older = envelope("gnss", "position", 1.9, (0.0, 0.0), 1.0)
+    accepted = rt.ingest_measurement(valid_older)
+    assert accepted.accepted
+    assert accepted.measurement_result is not None
+
+
 def test_normalized_measurements_drive_nominal_mode_and_rich_pnt_solution():
     health, coverage = build_reference_health_and_constraints()
     rt = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
