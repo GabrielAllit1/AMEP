@@ -43,8 +43,12 @@ class NavigationSupervisor:
             self.mode = NavMode.NOMINAL
             self.reason = "full_local_constraint_coverage_with_healthy_gnss"
         elif rank >= self.policy.full_rank and coverage.has_healthy_non_gnss_absolute:
-            self.mode = NavMode.GPS_DENIED_RESILIENT
-            self.reason = "full_local_constraint_coverage_with_non_gnss_absolute_source"
+            if integrity is not None and not integrity.resilient_navigation_permitted:
+                self.mode = NavMode.DEGRADED_DEAD_RECKONING
+                self.reason = "full_non_gnss_coverage_without_sufficient_integrity_diversity"
+            else:
+                self.mode = NavMode.GPS_DENIED_RESILIENT
+                self.reason = "full_local_constraint_coverage_with_integrity_supported_non_gnss_aiding"
         elif rank >= self.policy.degraded_rank:
             self.mode = NavMode.DEGRADED_DEAD_RECKONING
             self.reason = "partial_constraint_coverage"
