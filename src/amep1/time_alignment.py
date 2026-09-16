@@ -103,6 +103,8 @@ class TimeAlignmentResult:
 
 @dataclass(frozen=True)
 class IngestResult:
+    accepted: bool
+    reason: str
     alignment: TimeAlignmentResult
     measurement_result: MeasurementResult | None
 
