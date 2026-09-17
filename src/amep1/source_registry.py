@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 import hashlib
 import itertools
 import json
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from enum import Enum
 
 
 class SourceClass(str, Enum):
