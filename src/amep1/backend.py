@@ -12,9 +12,10 @@ from .types import MeasurementResult
 class EstimatorSnapshot:
     """Portable navigation projection from a platform estimator.
 
-    Internal estimator state dimension and representation are intentionally not
-    exposed to orchestration. Optional maritime fields are populated by
-    AMEPFilter and may be absent for other platform-specific estimators.
+    ``state_schema_id`` and ``covariance_labels`` make the covariance contract
+    explicit. A backend may use any internal state representation, but any matrix
+    exported through this snapshot must be interpretable without reading backend
+    source code.
     """
 
     frame: str
@@ -24,10 +25,25 @@ class EstimatorSnapshot:
     ground_velocity_n_mps: float
     heading_rad: float
     covariance: np.ndarray
+    state_schema_id: str
+    covariance_labels: tuple[str, ...]
     water_velocity_e_mps: float | None = None
     water_velocity_n_mps: float | None = None
     current_e_mps: float | None = None
     current_n_mps: float | None = None
+
+    def __post_init__(self) -> None:
+        covariance = np.asarray(self.covariance, dtype=float)
+        if covariance.ndim != 2 or covariance.shape[0] != covariance.shape[1]:
+            raise ValueError("snapshot covariance must be square")
+        if covariance.shape[0] != len(self.covariance_labels):
+            raise ValueError(
+                "snapshot covariance dimension must match covariance_labels length"
+            )
+        if not self.state_schema_id:
+            raise ValueError("state_schema_id must be non-empty")
+        if any(not label for label in self.covariance_labels):
+            raise ValueError("covariance labels must be non-empty")
 
 
 @runtime_checkable
