@@ -13,8 +13,9 @@ class PNTSolution:
 
     Covariance is self-describing through ``state_schema_id`` and
     ``covariance_labels``. The containment proxy is reported together with its
-    configured probability rather than encoding a probability into the field
-    name. Backend-specific maritime quantities remain nullable.
+    configured probability when the backend exposes that probability rather than
+    encoding a probability into the field name. Backend-specific maritime
+    quantities remain nullable.
     """
 
     timestamp_s: float | None
@@ -32,7 +33,7 @@ class PNTSolution:
     covariance: tuple[tuple[float, ...], ...]
     state_schema_id: str
     covariance_labels: tuple[str, ...]
-    containment_probability: float
+    containment_probability: float | None
     horizontal_containment_proxy_m: float
     horizontal_protection_bound_m: float | None
     protection_bound_validated: bool
