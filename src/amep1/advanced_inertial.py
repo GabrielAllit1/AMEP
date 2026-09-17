@@ -16,7 +16,7 @@ from .inertial import (
     _quat_to_dcm,
     _skew,
 )
-from .math_utils import nearest_psd, require_finite, wrap_angle
+from .math_utils import nearest_psd, require_finite
 from .types import MeasurementResult
 
 _WGS84_A_M = 6378137.0
