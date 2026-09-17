@@ -2,6 +2,8 @@
 
 This document records the engineering rationale, implemented hardening contracts, and remaining evidence gates for AMEP-1. The executable reference estimator remains a horizontal maritime research model. The surrounding timing, source-dependency, integrity, replay, and output interfaces are intended to support replacement estimator backends without asserting that one vehicle dynamics model is universal.
 
+> **Status reconciliation — 2026-09-17:** Sections P1 and P2 were originally written as forward-looking hardening work. Their software/SIL portions are now implemented by the gap-closure increment documented in `docs/SIL_GAP_CLOSURE_2026.md`, including the strapdown ESKF backends and dependency-derived FDE/replay machinery. P1/P2 therefore remain open at the platform-calibration, physical dependency-model, integrity-validation, target-hardware, HIL, and field-evidence layers; they should no longer be read as missing SIL architecture primitives.
+
 ## 1. Scope and evidence boundary
 
 AMEP currently addresses:
@@ -171,7 +173,7 @@ Communications heartbeat handling rejects non-finite and non-monotonic timestamp
 
 ### R10 — software verification runs on the dedicated self-hosted runner
 
-The AMEP GitHub Actions workflow targets the repository-specific Windows runner and validates a clean PR checkout. The workflow uses the already installed Python runtime on the self-hosted machine rather than attempting hosted-runner tool-cache installation.
+The trusted AMEP GitHub Actions CI workflow targets the repository-specific Windows self-hosted runner for pushes to repository branches. Public pull requests use the separate metadata-only intake workflow and do not execute untrusted pull-request code on the privileged runner. The trusted CI path uses the installed Python runtime on the self-hosted machine rather than a hosted-runner tool cache.
 
 ## 5. Remaining engineering and evidence gates
 
@@ -185,23 +187,24 @@ The AMEP GitHub Actions workflow targets the repository-specific Windows runner 
 - HIL fault injection for dropout, frozen data, clock skew, frame mistakes, gross faults, slow bias, shared-map faults, and common-cause faults;
 - controlled water trials with independent truth, safety observers, abort criteria, and complete logs.
 
-### P1 — calibrated inertial mechanization
+### P1 — strapdown inertial mechanization — SIL implementation complete; operational calibration open
 
-Implement and evaluate a separate strapdown INS/ESKF backend rather than feeding raw accelerometer specific force into the seven-state maritime filter. A production-facing inertial state will normally require position, velocity, attitude, gyro bias, and accelerometer bias at minimum, with explicit Earth/gravity/frame conventions and sensor calibration.
+The repository now includes separate 15-state strapdown ESKF reference backends in `src/amep1/inertial.py` and `src/amep1/advanced_inertial.py`. The compensated backend adds coning/sculling compensation, WGS-84 curvature and transport-rate terms, Earth/transport-frame compensation, Coriolis/transport velocity mechanization, inertial-bias states, covariance propagation, and lever-arm-aware observation models.
 
-Invariant-filter formulations are comparison candidates, not automatic upgrades.
+The remaining P1 gate is evidence, not absence of a SIL estimator primitive: device-specific IMU increment semantics, measured noise/bias characterization, temperature/vibration behavior, installation calibration, recorded inertial data, target-compute timing, and platform validation are still required. Invariant-filter formulations remain comparison candidates, not automatic upgrades.
 
-### P2 — architecture-derived FDE and integrity bounds
+### P2 — architecture-derived FDE and integrity bounds — SIL implementation complete; validated integrity claim open
 
-Required work includes:
+The repository now includes dependency-derived fault hypotheses, explicit integrity-risk allocation, solution-separation monitoring, false-alert/missed-detection/time-to-alert metrics, and deterministic hypothesis-excluded replay in `src/amep1/fde.py` and `src/amep1/fde_replay.py`.
 
-- a reviewed source-dependency/common-cause graph;
-- fault hypotheses derived from the actual platform architecture;
-- solution separation, multi-hypothesis testing, or an equivalent FDE mechanism appropriate to the measurement set;
-- false-alert, missed-detection, and time-to-alert metrics;
-- non-Gaussian/heavy-tail sensitivity;
-- explicit common-cause hypotheses;
-- a protection/integrity bound only after a declared risk allocation and empirical validation against independent truth.
+The remaining P2 work is the evidence required to turn those research primitives into a defensible platform integrity argument:
+
+- a reviewed physical/electrical/software source-dependency and common-cause graph for the actual platform;
+- platform-derived fault priors or a justified integrity-risk allocation;
+- frozen alert limits plus false-alert, missed-detection, and time-to-alert validation;
+- validated treatment of subset-solution cross-covariance where required;
+- non-Gaussian/heavy-tail and explicit common-cause sensitivity;
+- empirical validation against independent truth before any protection/integrity-bound claim.
 
 ### P3 — delayed/asynchronous estimation
 
