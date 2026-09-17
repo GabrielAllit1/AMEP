@@ -18,9 +18,13 @@ This manifest maps the authoritative source, tests, examples, validation records
 
 | Path | Function |
 | --- | --- |
-| `src/amep1/__init__.py` | Public package exports for estimator, backend, timing, dependency, integrity, replay, evidence, supervision, solution, and profile contracts. |
+| `src/amep1/__init__.py` | Public package exports for estimator, backend, timing, dependency, integrity, FDE, calibration, adapters, replay, evidence, supervision, solution, and profile contracts. |
 | `src/amep1/backend.py` | Replaceable `EstimatorBackend`, schema-labeled `EstimatorSnapshot`, and delayed-measurement backend protocol. |
 | `src/amep1/estimator.py` | Current seven-state maritime EKF backend with heading-sensitive propagation Jacobian, NIS gating, Cholesky solves, Joseph covariance update, PSD repair, semantic observation dispatch, and explicit covariance schema. |
+| `src/amep1/inertial.py` | Local-ENU strapdown INS / 15-error-state ESKF reference backend with attitude, accelerometer/gyro bias states, WGS-84 gravity, Earth-rate/Coriolis terms, covariance propagation, Joseph updates, and explicit SIL-only claim boundary. |
+| `src/amep1/fde.py` | Dependency-derived fault hypotheses, explicit integrity-risk bookkeeping, estimator-independent horizontal solution separation, and false-alert/missed-detection/time-to-alert campaign metrics. |
+| `src/amep1/installation.py` | Lever-arm, boresight, latency, calibration provenance/covariance contracts plus rigid-body velocity correction and first-order uncertainty propagation. |
+| `src/amep1/nmea0183.py` | Checksum-validating selected NMEA 0183 parsing, bounded byte-stream framing, and normalization to `MeasurementEnvelope`; no IEC 61162/electrical-conformance claim. |
 | `src/amep1/config.py` | Estimator/process-noise/source policies plus runtime policy for legacy-update and source-registration enforcement. |
 | `src/amep1/math_utils.py` | Angle wrapping, covariance symmetrization, nearest-PSD projection, and finite-value validation. |
 | `src/amep1/types.py` | Core prediction/result/status contracts including the current preprocessed horizontal IMU input. |
@@ -49,12 +53,19 @@ This manifest maps the authoritative source, tests, examples, validation records
 | `tests/test_operations.py` | Communications failover/timestamp validation, watchdog behavior, reference-profile contents, and runtime prediction-fault latching. |
 | `tests/test_pnt_backbone.py` | Clock normalization, timestamp uncertainty, ordering, unknown clocks, rejected-contract watermark safety, full-covariance normalized ingestion, integrity veto, nominal operation, and schema-explicit PNT output. |
 | `tests/test_production_hardening.py` | Backend portability, normalized-path enforcement, safety-credit prerequisites, shared-dependency handling, resilient-mode permission, pre-fusion contradiction blocking, configuration fingerprints, evidence tamper detection, receive-order replay, and replay acceptance accounting. |
+| `tests/test_sil_gap_closure.py` | Strapdown ESKF reference behavior, dependency-derived FDE/risk allocation, detection metrics, installation uncertainty propagation, and NMEA 0183 normalization. |
 
 ## `examples/`
 
 | Path | Function |
 | --- | --- |
 | `examples/runtime_example.py` | Normalized research integration example using `MeasurementEnvelope -> ingest_measurement()` and the conservative reference runtime. Numeric inputs are illustrative software data, not field evidence. |
+
+## `assurance/`
+
+| Path | Function |
+| --- | --- |
+| `assurance/requirements-to-tests.json` | Executable requirement-to-test traceability, including SIL-only INS, FDE, calibration, and adapter claim boundaries. |
 
 ## `docs/`
 
@@ -63,6 +74,7 @@ This manifest maps the authoritative source, tests, examples, validation records
 | `docs/ARCHITECTURE.md` | Current runtime architecture and subsystem contracts. |
 | `docs/GNSS_DENIAL.md` | GNSS-denial objective, current integrity/degradation behavior, source-credit boundary, and staged evidence gates. |
 | `docs/PRODUCTION_HARDENING_2026.md` | Engineering rationale, implemented hardening requirements, current architecture, external-review evidence requirements, and P0–P5 remaining gates. |
+| `docs/SIL_GAP_CLOSURE_2026.md` | Post-v1.0 SIL increment covering the ESKF, FDE/risk framework, installation-calibration contracts, NMEA normalization, and the evidence gates that remain open. |
 | `docs/VALIDATION.md` | Current software-validation status and separation from recorded-data/HIL/field evidence. |
 | `docs/validation/TEST_RESULTS.txt` | Historical pre-normalization software validation snapshot. |
 | `docs/validation/PNT_BACKBONE_TEST_RESULTS.txt` | Previous PNT-backbone software validation snapshot and historical runner limitation. |
@@ -76,8 +88,8 @@ This manifest maps the authoritative source, tests, examples, validation records
 
 ## Architectural scope
 
-The executable reference estimator is maritime. Portable elements include semantic measurement/time contracts, dependency declarations, configurable state-dimension coverage, estimator backend boundaries, schema-labeled covariance output, integrity/authority behavior, replay, and software evidence.
+The executable seven-state reference estimator is maritime. Portable elements include semantic measurement/time contracts, dependency declarations, configurable state-dimension coverage, estimator backend boundaries, schema-labeled covariance output, integrity/authority behavior, replay, and software evidence. The repository now also includes a local-level 15-state ESKF reference backend and estimator-independent SIL FDE/calibration/adapter components.
 
-A USV, UUV, UAV, UGV, or other integration must provide its own estimator dynamics where appropriate, state schema, prediction-input contract, frames/datums, source profile, dependency analysis, safety-credit decisions, constraint/observability model, timing profile, and safe-state behavior.
+A USV, UUV, UAV, UGV, or other integration must still provide and validate its own estimator tuning/dynamics where appropriate, state schema, prediction-input contract, frames/datums, source profile, physical dependency analysis, safety-credit decisions, constraint/observability model, timing profile, installation calibration, hardware adapters, and safe-state behavior.
 
-The current repository does **not** establish certified FDE/RAIM, a validated protection level, a production strapdown INS, real sensor/bus validation, target-hardware real-time performance, HIL qualification, or controlled-field/water evidence. Those remain explicit production evidence gates.
+The current repository does **not** establish certified FDE/RAIM, a validated protection level, calibrated operational INS performance, real sensor/bus validation, target-hardware real-time performance, HIL qualification, or controlled-field/water evidence. Those remain explicit production evidence gates.

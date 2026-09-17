@@ -74,6 +74,40 @@
         "tests/test_production_hardening.py::test_evidence_jsonl_round_trip_is_deterministic",
         "tests/test_production_hardening.py::test_deterministic_replay_reproduces_solution_and_evidence"
       ]
+    },
+    {
+      "id": "AMEP-INS-001",
+      "statement": "The replaceable inertial backend shall represent a local-level strapdown nominal state with three-axis position, velocity, attitude, accelerometer bias, gyroscope bias, and a 15-state error covariance, including gravity, Earth-rate/Coriolis terms, covariance propagation, innovation screening, and Joseph-form measurement updates.",
+      "claim_boundary": "Reference SIL mechanization only; noise values are not IMU-calibrated and no target-hardware or vessel performance claim is made.",
+      "tests": [
+        "tests/test_sil_gap_closure.py::test_strapdown_eskf_stationary_and_position_update",
+        "tests/test_sil_gap_closure.py::test_strapdown_eskf_constant_acceleration_and_rejects_outlier"
+      ]
+    },
+    {
+      "id": "AMEP-FDE-001",
+      "statement": "The SIL integrity research layer shall derive fault hypotheses from declared source dependencies, support explicit per-hypothesis integrity-risk bookkeeping, evaluate covariance-aware horizontal solution separation, and summarize false-alert, missed-detection, and time-to-alert trial metrics.",
+      "claim_boundary": "Generic SIL FDE framework only; hypotheses are not a verified vessel fault tree and the outputs are not validated protection levels.",
+      "tests": [
+        "tests/test_sil_gap_closure.py::test_dependency_derived_fde_risk_allocation_and_solution_separation",
+        "tests/test_sil_gap_closure.py::test_fde_detection_metrics_report_false_alert_miss_and_time_to_alert"
+      ]
+    },
+    {
+      "id": "AMEP-CAL-001",
+      "statement": "Sensor installation contracts shall carry lever-arm, boresight, latency, calibration provenance, and calibration covariance, and shall support rigid-body velocity correction with first-order uncertainty propagation.",
+      "claim_boundary": "Software calibration-data contract only; the repository does not provide measured platform installation values or validate the survey procedure.",
+      "tests": [
+        "tests/test_sil_gap_closure.py::test_installation_lever_arm_boresight_and_uncertainty_propagation"
+      ]
+    },
+    {
+      "id": "AMEP-ADAPT-001",
+      "statement": "The reference NMEA 0183 adapter shall validate checksums, parse selected navigation sentence families, frame bounded byte streams, and normalize supported observations into timestamped covariance-bearing MeasurementEnvelope records.",
+      "claim_boundary": "Software sentence/stream normalization only; no IEC 61162 electrical, serial-bus, or vessel-interface conformity claim is made.",
+      "tests": [
+        "tests/test_sil_gap_closure.py::test_nmea0183_parser_adapter_and_stream_decoder"
+      ]
     }
   ]
 }
