@@ -66,12 +66,13 @@ This manifest maps the authoritative source, tests, examples, validation records
 | `docs/VALIDATION.md` | Current software-validation status and separation from recorded-data/HIL/field evidence. |
 | `docs/validation/TEST_RESULTS.txt` | Historical pre-normalization software validation snapshot. |
 | `docs/validation/PNT_BACKBONE_TEST_RESULTS.txt` | Previous PNT-backbone software validation snapshot and historical runner limitation. |
+| `docs/validation/PRODUCTION_HARDENING_TEST_RESULTS.txt` | Current production-hardening software-validation snapshot from the dedicated Windows runner. |
 
 ## `.github/workflows/`
 
 | Path | Function |
 | --- | --- |
-| `.github/workflows/ci.yml` | Clean PR checkout on the dedicated Windows AMEP runner; verifies Python, installs test/QA tooling, compiles, lints, type-checks, performs static security and runtime dependency audits, generates a CycloneDX SBOM, runs coverage-gated pytest, and uploads assurance artifacts. |
+| `.github/workflows/ci.yml` | Clean checkout on the dedicated Windows AMEP runner; verifies Python, installs test/QA tooling, compiles, lints, type-checks, performs static security and runtime dependency audits, generates a CycloneDX SBOM, runs coverage-gated pytest, and persists assurance outputs on the self-hosted runner. |
 
 ## Architectural scope
 

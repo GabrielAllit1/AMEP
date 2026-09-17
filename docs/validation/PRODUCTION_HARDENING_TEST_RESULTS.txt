@@ -1,0 +1,30 @@
+AMEP-1 PRODUCTION HARDENING SOFTWARE VALIDATION SNAPSHOT
+Date: 2026-09-17
+Branch validated: main
+Commit validated: 7e98c958ddec73ed1957681338d91296a7616d47
+GitHub Actions run: 35245881364
+Job: Windows self-hosted
+Runner: amep-windows-01
+Machine: PRAISE-GOD
+Runner version: 2.337.0
+Python: 3.13.2
+pip: 26.2.1
+
+RESULTS
+=======
+Compileall: PASS
+Ruff: PASS
+mypy: PASS — no issues found in 21 source files
+Bandit: PASS
+Runtime dependency audit: PASS — no known vulnerabilities found
+CycloneDX SBOM generation: PASS
+Pytest: PASS — 48 passed in 2.47s
+Coverage: 88.55% (required floor: 75%)
+Assurance artifact persistence: PASS
+
+Persisted runner path for this run:
+C:\Users\gabri\actions-runner-amep\_work\_artifacts\AMEP\35245881364
+
+EVIDENCE BOUNDARY
+=================
+This is software verification on the dedicated self-hosted Windows runner. It is not evidence of recorded maritime truth performance, target-hardware real-time determinism, HIL qualification, water-trial performance, certified FDE/RAIM, a validated protection level, operational navigation safety, or regulatory conformity.
