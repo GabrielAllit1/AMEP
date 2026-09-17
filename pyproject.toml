@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "amep1"
-version = "0.3.0.dev0"
+version = "0.3.0"
 description = "EKF-centered resilient maritime PNT and autonomy-authority research for GNSS-degraded and GNSS-denied USV operation"
 readme = "README.md"
 requires-python = ">=3.10"
