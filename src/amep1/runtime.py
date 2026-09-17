@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
+from enum import Enum
+from typing import Mapping
 
 import numpy as np
 
@@ -10,12 +12,32 @@ from .config import RuntimePolicy
 from .consistency import CrossSourceConsistencyMonitor
 from .constraints import ConstraintCoverage
 from .estimator import TimebaseError
+from .evidence import JSONValue, canonical_fingerprint, software_identity
 from .health import SensorHealthManager
 from .integrity import IntegrityEngine, IntegrityReport
 from .solution import PNTSolution
 from .source_registry import SourceClass, SourceRegistry
-from .time_alignment import IngestResult, MeasurementEnvelope, TimeAligner, TimeAlignmentResult
+from .time_alignment import (
+    IngestResult,
+    MeasurementEnvelope,
+    TimeAligner,
+    TimeAlignmentResult,
+)
 from .types import MeasurementResult, NavigationStatus
+
+
+def _jsonable(value: object) -> JSONValue:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Enum):
+        return _jsonable(value.value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(asdict(value))
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    raise TypeError(f"configuration value is not JSON-compatible: {type(value).__name__}")
 
 
 @dataclass
@@ -27,7 +49,9 @@ class AMEPRuntime:
     time_aligner: TimeAligner = field(default_factory=TimeAligner)
     integrity: IntegrityEngine = field(default_factory=IntegrityEngine)
     source_registry: SourceRegistry = field(default_factory=SourceRegistry)
-    consistency: CrossSourceConsistencyMonitor = field(default_factory=CrossSourceConsistencyMonitor)
+    consistency: CrossSourceConsistencyMonitor = field(
+        default_factory=CrossSourceConsistencyMonitor
+    )
     runtime_policy: RuntimePolicy = field(default_factory=RuntimePolicy)
     hard_fault_reason: str | None = None
 
@@ -40,8 +64,53 @@ class AMEPRuntime:
             raise
 
     def clear_hard_fault(self) -> None:
-        """Explicit operator/integration recovery hook after the root cause is handled."""
+        """Explicit recovery hook after the prediction-fault root cause is handled."""
         self.hard_fault_reason = None
+
+    def configuration_manifest(self) -> dict[str, JSONValue]:
+        """Return behavior-affecting runtime configuration plus software identity."""
+        estimator_config = getattr(self.estimator, "config", None)
+        estimator_configuration: JSONValue
+        if estimator_config is None:
+            estimator_configuration = None
+        else:
+            try:
+                estimator_configuration = _jsonable(estimator_config)
+            except TypeError:
+                estimator_configuration = {
+                    "type": (
+                        f"{type(estimator_config).__module__}."
+                        f"{type(estimator_config).__qualname__}"
+                    ),
+                    "serialization": "unavailable",
+                }
+
+        return {
+            "software": software_identity(),
+            "estimator": {
+                "type": (
+                    f"{type(self.estimator).__module__}."
+                    f"{type(self.estimator).__qualname__}"
+                ),
+                "measurement_kinds": list(self.estimator.measurement_kinds),
+                "accepted_frames": list(self.estimator.accepted_frames),
+                "config": estimator_configuration,
+            },
+            "health": _jsonable(self.health.configuration()),
+            "coverage": _jsonable(self.coverage.configuration()),
+            "source_registry": {
+                "sha256": self.source_registry.fingerprint(),
+                "sources": _jsonable(self.source_registry.configuration()),
+            },
+            "time_alignment": _jsonable(self.time_aligner.configuration()),
+            "integrity_policy": _jsonable(self.integrity.policy),
+            "consistency_policy": _jsonable(self.consistency.policy),
+            "navigation_policy": _jsonable(self.supervisor.policy),
+            "runtime_policy": _jsonable(self.runtime_policy),
+        }
+
+    def configuration_fingerprint(self) -> str:
+        return canonical_fingerprint(self.configuration_manifest())
 
     def _require_legacy_direct_updates(self) -> None:
         if not self.runtime_policy.allow_legacy_direct_updates:
@@ -163,9 +232,15 @@ class AMEPRuntime:
             covariance=np.array([[float(sigma) ** 2]]),
         )
 
-    def _source_contract_error(self, envelope: MeasurementEnvelope, timestamp_uncertainty_s: float) -> str | None:
+    def _source_contract_error(
+        self,
+        envelope: MeasurementEnvelope,
+        timestamp_uncertainty_s: float,
+    ) -> str | None:
         descriptor = self.source_registry.descriptor(envelope.source)
         if descriptor is None:
+            if self.runtime_policy.require_registered_sources:
+                return "unregistered_source_descriptor"
             return None
         if descriptor.clock_domain != envelope.clock_domain:
             return "source_clock_domain_mismatch"
@@ -193,7 +268,7 @@ class AMEPRuntime:
         *,
         now_s: float | None = None,
     ) -> IngestResult:
-        """Align, validate, cross-check, backend-update, and health-account a measurement."""
+        """Align, validate, cross-check, backend-update, and account a measurement."""
         alignment = self.time_aligner.align(envelope, now_s=now_s, commit=False)
         if not alignment.accepted or alignment.measurement is None:
             return IngestResult(False, alignment.reason, alignment, None)
@@ -215,10 +290,19 @@ class AMEPRuntime:
 
         consistency_report = None
         if envelope.kind == "position":
-            consistency_report = self.consistency.assess_position(aligned, self.source_registry)
+            consistency_report = self.consistency.assess_position(
+                aligned, self.source_registry
+            )
             if not consistency_report.consistent:
-                rejected = TimeAlignmentResult(False, "cross_source_consistency_conflict", aligned)
-                return IngestResult(False, "cross_source_consistency_conflict", rejected, None)
+                rejected = TimeAlignmentResult(
+                    False, "cross_source_consistency_conflict", aligned
+                )
+                return IngestResult(
+                    False,
+                    "cross_source_consistency_conflict",
+                    rejected,
+                    None,
+                )
 
         try:
             allow_fusion = self.health.may_fuse(envelope.source)
@@ -299,13 +383,17 @@ class AMEPRuntime:
         integrity = self.integrity_report(now_s)
         snapshot = self.estimator.snapshot()
         covariance = tuple(
-            tuple(float(v) for v in row)
+            tuple(float(value) for value in row)
             for row in np.asarray(snapshot.covariance, dtype=float)
         )
         if status.timestamp_s is None:
             source_age_s = {name: None for name in self.health.states()}
         else:
             source_age_s = self.health.source_ages(status.timestamp_s)
+
+        estimator_config = getattr(self.estimator, "config", None)
+        probability = getattr(estimator_config, "containment_probability", None)
+        containment_probability = None if probability is None else float(probability)
 
         return PNTSolution(
             timestamp_s=status.timestamp_s,
@@ -321,7 +409,10 @@ class AMEPRuntime:
             current_n_mps=snapshot.current_n_mps,
             heading_rad=status.heading_rad,
             covariance=covariance,
-            containment_proxy_95_m=status.containment_proxy_m,
+            state_schema_id=snapshot.state_schema_id,
+            covariance_labels=snapshot.covariance_labels,
+            containment_probability=containment_probability,
+            horizontal_containment_proxy_m=status.containment_proxy_m,
             horizontal_protection_bound_m=integrity.horizontal_protection_bound_m,
             protection_bound_validated=integrity.protection_bound_validated,
             integrity_status=integrity.status,
