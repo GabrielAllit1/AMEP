@@ -1,0 +1,38 @@
+AMEP-1 SOFTWARE GAP CLOSURE VALIDATION SNAPSHOT
+Date: 2026-09-17
+PR: #4 — Close AMEP strapdown and delayed-estimation software gaps
+Validated branch head before evidence-only documentation: 81b9e3c77c168b53a94bf1336fca101e288d8ff1
+GitHub Actions run: 35248140186
+Job: Windows self-hosted
+Runner: amep-windows-01
+Machine: PRAISE-GOD
+Runner version: 2.337.0
+Python: 3.13.2
+pip: 26.2.1
+
+RESULTS
+=======
+Compileall: PASS
+Ruff: PASS
+mypy: PASS — no issues found in 24 source files
+Bandit: PASS
+Runtime dependency audit: PASS — no known vulnerabilities found
+CycloneDX SBOM generation: PASS
+Pytest: PASS — 65 passed in 3.19s
+Coverage: 87.09% (required floor: 75%)
+Assurance artifact persistence: PASS
+
+Persisted runner path for this run:
+C:\Users\gabri\actions-runner-amep\_work\_artifacts\AMEP\35248140186
+
+SOFTWARE CLOSURE COVERED
+========================
+- separate raw-IMU, bias-aware strapdown INS/ESKF backend
+- deterministic bounded fixed-lag rewind/replay backend
+- explicit delayed runtime ingestion path
+- delayed source-health accounting without freshness time regression
+- ordinary runtime path remains fail-closed on out-of-order measurements
+
+EVIDENCE BOUNDARY
+=================
+This is software verification on the dedicated self-hosted Windows runner. It is not evidence of calibrated inertial performance, recorded maritime truth performance, target-hardware real-time determinism, HIL qualification, water-trial performance, certified FDE/RAIM, a validated protection level, operational navigation safety, or regulatory conformity.
