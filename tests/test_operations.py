@@ -10,6 +10,7 @@ from amep1 import (
     HorizontalIMUInput,
     LinkPolicy,
     NavMode,
+    RuntimePolicy,
     TimebaseError,
     build_reference_health_and_constraints,
 )
@@ -100,7 +101,12 @@ def test_reference_profile_has_published_generic_sources():
 
 def test_runtime_prediction_fault_latches_safe_hold():
     health, coverage = build_reference_health_and_constraints()
-    runtime = AMEPRuntime(AMEPFilter(), health, coverage)
+    runtime = AMEPRuntime(
+        AMEPFilter(),
+        health,
+        coverage,
+        runtime_policy=RuntimePolicy.compatibility(),
+    )
     runtime.predict(HorizontalIMUInput(1.0, 0, 0, 0))
     with pytest.raises(TimebaseError):
         runtime.predict(HorizontalIMUInput(1.0, 0, 0, 0))
