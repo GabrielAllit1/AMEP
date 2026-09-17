@@ -58,6 +58,9 @@ class EstimatorBackend(Protocol):
     @property
     def accepted_frames(self) -> tuple[str, ...]: ...
 
+    @property
+    def containment_probability(self) -> float: ...
+
     def predict(self, prediction_input: object) -> float: ...
 
     def update_measurement(
