@@ -11,18 +11,26 @@ from amep1 import (
 )
 
 
-def envelope(source, kind, timestamp, values, variance, *, clock_domain="navigation"):
-    n = len(values)
+def envelope(
+    source,
+    kind,
+    timestamp,
+    values,
+    variance,
+    *,
+    clock_domain="navigation",
+):
+    dimension = len(values)
     covariance = tuple(
-        tuple(float(variance) if i == j else 0.0 for j in range(n))
-        for i in range(n)
+        tuple(float(variance) if row == column else 0.0 for column in range(dimension))
+        for row in range(dimension)
     )
     return MeasurementEnvelope(
         source=source,
         kind=kind,
         source_timestamp_s=timestamp,
         receive_timestamp_s=timestamp + 0.05,
-        values=tuple(float(v) for v in values),
+        values=tuple(float(value) for value in values),
         covariance=covariance,
         clock_domain=clock_domain,
     )
@@ -30,7 +38,11 @@ def envelope(source, kind, timestamp, values, variance, *, clock_domain="navigat
 
 def test_time_alignment_normalizes_clock_domain_and_rejects_out_of_order():
     aligner = TimeAligner()
-    aligner.register_clock_domain("sensor_clock", offset_to_navigation_s=1.0, uncertainty_s=0.01)
+    aligner.register_clock_domain(
+        "sensor_clock",
+        offset_to_navigation_s=1.0,
+        uncertainty_s=0.01,
+    )
     first = MeasurementEnvelope(
         source="gnss",
         kind="position",
@@ -63,9 +75,16 @@ def test_time_alignment_normalizes_clock_domain_and_rejects_out_of_order():
 
 def test_unknown_clock_domain_fails_closed_before_fusion():
     health, coverage = build_reference_health_and_constraints()
-    rt = AMEPRuntime(AMEPFilter(), health, coverage)
-    result = rt.ingest_measurement(
-        envelope("gnss", "position", 1.0, (0.0, 0.0), 1.0, clock_domain="unknown")
+    runtime = AMEPRuntime(AMEPFilter(), health, coverage)
+    result = runtime.ingest_measurement(
+        envelope(
+            "gnss",
+            "position",
+            1.0,
+            (0.0, 0.0),
+            1.0,
+            clock_domain="unknown",
+        )
     )
     assert not result.accepted
     assert result.reason == "unknown_clock_domain"
@@ -74,38 +93,55 @@ def test_unknown_clock_domain_fails_closed_before_fusion():
 
 def test_rejected_contract_does_not_advance_source_time_watermark():
     health, coverage = build_reference_health_and_constraints()
-    rt = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
+    runtime = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
 
-    malformed = envelope("gnss", "not_a_measurement_kind", 2.0, (0.0, 0.0), 1.0)
-    rejected = rt.ingest_measurement(malformed)
+    malformed = envelope(
+        "gnss",
+        "not_a_measurement_kind",
+        2.0,
+        (0.0, 0.0),
+        1.0,
+    )
+    rejected = runtime.ingest_measurement(malformed)
     assert not rejected.accepted
     assert rejected.reason == "unsupported_measurement_kind"
 
     valid_older = envelope("gnss", "position", 1.9, (0.0, 0.0), 1.0)
-    accepted = rt.ingest_measurement(valid_older)
+    accepted = runtime.ingest_measurement(valid_older)
     assert accepted.accepted
     assert accepted.measurement_result is not None
 
 
 def test_normalized_measurements_drive_nominal_mode_and_rich_pnt_solution():
     health, coverage = build_reference_health_and_constraints()
-    rt = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
+    runtime = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
 
-    assert rt.ingest_measurement(envelope("gnss", "position", 1.00, (0.0, 0.0), 1.0)).accepted
-    assert rt.ingest_measurement(envelope("speed_log", "water_velocity", 1.01, (0.0, 0.0), 0.25)).accepted
-    assert rt.ingest_measurement(envelope("current_prior", "current_prior", 1.02, (0.0, 0.0), 0.25)).accepted
-    assert rt.ingest_measurement(envelope("gyrocompass", "heading", 1.03, (0.0,), 0.01)).accepted
+    assert runtime.ingest_measurement(
+        envelope("gnss", "position", 1.00, (0.0, 0.0), 1.0)
+    ).accepted
+    assert runtime.ingest_measurement(
+        envelope("speed_log", "water_velocity", 1.01, (0.0, 0.0), 0.25)
+    ).accepted
+    assert runtime.ingest_measurement(
+        envelope("current_prior", "current_prior", 1.02, (0.0, 0.0), 0.25)
+    ).accepted
+    assert runtime.ingest_measurement(
+        envelope("gyrocompass", "heading", 1.03, (0.0,), 0.01)
+    ).accepted
 
-    solution = rt.pnt_solution(now_s=1.10)
+    solution = runtime.pnt_solution(now_s=1.10)
     assert solution.mode == NavMode.NOMINAL
     assert solution.information_rank == 7
     assert solution.integrity_status == IntegrityStatus.MONITORING
     assert solution.integrity.navigation_permitted
     assert not solution.protection_bound_validated
     assert solution.horizontal_protection_bound_m is None
-    assert solution.containment_proxy_95_m > 0
+    assert solution.horizontal_containment_proxy_m > 0
+    assert solution.containment_probability == 0.95
+    assert solution.state_schema_id == "amep1.horizontal.v1"
     assert len(solution.covariance) == 7
     assert all(len(row) == 7 for row in solution.covariance)
+    assert len(solution.covariance_labels) == 7
     assert solution.source_age_s["gnss"] is not None
     assert solution.attitude_available is False
     assert solution.navigation_time_validated is False
@@ -113,9 +149,9 @@ def test_normalized_measurements_drive_nominal_mode_and_rich_pnt_solution():
 
 def test_integrity_blocks_navigation_when_constraint_rank_is_insufficient():
     health, coverage = build_reference_health_and_constraints()
-    rt = AMEPRuntime(AMEPFilter(), health, coverage)
-    report = rt.integrity_report(now_s=0.0)
-    status = rt.status(now_s=0.0)
+    runtime = AMEPRuntime(AMEPFilter(), health, coverage)
+    report = runtime.integrity_report(now_s=0.0)
+    status = runtime.status(now_s=0.0)
     assert report.status == IntegrityStatus.UNAVAILABLE
     assert not report.navigation_permitted
     assert status.mode == NavMode.SAFE_HOLD
@@ -124,7 +160,7 @@ def test_integrity_blocks_navigation_when_constraint_rank_is_insufficient():
 
 def test_full_covariance_measurement_contract_is_used_by_runtime():
     health, coverage = build_reference_health_and_constraints()
-    rt = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
+    runtime = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
     measurement = MeasurementEnvelope(
         source="gnss",
         kind="position",
@@ -133,7 +169,7 @@ def test_full_covariance_measurement_contract_is_used_by_runtime():
         values=(0.1, -0.1),
         covariance=((1.0, 0.2), (0.2, 2.0)),
     )
-    result = rt.ingest_measurement(measurement)
+    result = runtime.ingest_measurement(measurement)
     assert result.accepted
     assert result.measurement_result is not None
     assert result.measurement_result.accepted
