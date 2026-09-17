@@ -1,6 +1,6 @@
 # GNSS-Denial Engineering Objective
 
-AMEP-1 is being developed toward resilient maritime navigation through environments where GPS/GNSS is intentionally denied, jammed, unreliable, or potentially deceptive. This document defines what that objective means for the current stack and what evidence is still required.
+AMEP-1 is being developed toward resilient maritime navigation in environments where GPS/GNSS is unavailable, jammed, unreliable, or potentially deceptive. This document defines the current software behavior and the evidence still required before any operational denial-zone claim.
 
 ## Threat classes
 
@@ -8,92 +8,109 @@ AMEP-1 is being developed toward resilient maritime navigation through environme
 
 The receiver produces no usable position solution, becomes stale, reports loss of lock, or otherwise stops contributing valid observations.
 
-This is the cleanest GNSS-denial case for the current architecture. AMEP can continue propagating its EKF state from leveled inertial motion, water-relative velocity, estimated current, and heading. Non-GNSS absolute fixes can bound drift when available.
+The current maritime estimator can continue propagating from leveled inertial motion, water-relative velocity, estimated current, and heading. Non-GNSS absolute observations can bound drift when available, but their presence alone does not establish resilient-navigation integrity.
 
 ### 2. Grossly inconsistent GNSS
 
-A received position is far enough from the predicted distribution that its normalized innovation squared exceeds the configured chi-square gate.
+A received position may be far enough from the predicted distribution that its normalized innovation squared exceeds the configured chi-square gate. The estimator can reject the observation and repeated rejections can isolate the source.
 
-The current estimator can reject the measurement, and repeated rejections can isolate the source. This is useful fault screening, but a large innovation does not identify the cause as jamming or spoofing.
+A large innovation is fault evidence, not proof that the cause is jamming or spoofing.
 
 ### 3. Plausible spoofing or slow bias
 
-A false GNSS solution moves gradually or remains statistically plausible relative to the estimator. A conventional innovation gate can accept this class of fault.
+A false GNSS solution may move gradually or remain statistically plausible relative to the estimator. A conventional innovation gate can accept this class of fault.
 
-The current AMEP kernel does not claim robust detection of sophisticated spoofing.
+The current AMEP software does not claim robust detection of sophisticated spoofing.
 
-### 4. Correlated/common-mode deception
+### 4. Correlated/common-mode error
 
-Multiple absolute sources agree with the same wrong answer because they share a map, clock, environmental model, upstream dependency, or injected bias.
+Multiple absolute sources can agree with the same wrong answer because they share a map, clock, calibration, preprocessing service, compute process, RF environment, power domain, or another upstream dependency.
 
-This is a critical integrity problem. The AMEP v1.0 research release demonstrated severe covariance overconfidence under a correlated common-mode position-bias stress case. EKF covariance and NIS gating alone are insufficient.
+AMEP v1.0 demonstrated severe covariance overconfidence under a correlated common-mode position-bias stress case. EKF covariance and source-local NIS screening are therefore insufficient as an integrity argument.
 
-## Current denial-zone mechanism
+## Current denial-zone decision path
 
-The current runtime uses three distinct layers:
+The hardened runtime separates five concerns:
 
-1. **Estimate:** the seven-state EKF propagates position, water-relative velocity, current, and heading and fuses available aiding measurements.
-2. **Assess:** source health tracks freshness and innovation behavior; constraint coverage evaluates which state dimensions remain constrained.
-3. **Authorize:** navigation mode determines whether autonomy is permitted, degraded, or forced into `SAFE_HOLD`.
+1. **Normalize:** preserve and validate source time, receive time, frame, covariance, provenance, and timestamp uncertainty.
+2. **Estimate:** propagate the active estimator backend and evaluate/fuse semantic observations.
+3. **Assess health:** track freshness and innovation behavior for each source.
+4. **Assess integrity:** evaluate local constraint coverage, declared source dependencies, cross-source contradictions, and latched faults.
+5. **Authorize:** select a navigation mode only after integrity evidence is available.
 
-The intended state transition during a GNSS jammer encounter is therefore not “ignore GPS and hope.” It is:
+The GNSS-loss transition is therefore:
 
 ```text
 NOMINAL
-  │
-  │ GNSS stale / rejected / unavailable
+  |
+  | GNSS stale / rejected / unavailable
   v
-recompute healthy constraints
-  │
-  ├─ full state + non-GNSS absolute fix ──> GPS_DENIED_RESILIENT
-  │
-  ├─ partial constraints ─────────────────> DEGRADED_DEAD_RECKONING
-  │
-  └─ insufficient constraints ────────────> SAFE_HOLD
+recompute health + constraint coverage + integrity
+  |
+  |-- full state + non-GNSS absolute aiding
+  |      + explicit resilient-navigation permission
+  |      + sufficient dependency-disjoint safety-credit sources
+  |          -> GPS_DENIED_RESILIENT
+  |
+  |-- full/partial constraints without sufficient integrity evidence
+  |          -> DEGRADED_DEAD_RECKONING
+  |
+  `-- insufficient constraints or integrity veto
+             -> SAFE_HOLD
 ```
+
+The default integrity policy requires at least two ONLINE non-GNSS absolute sources that have been explicitly granted safety credit and whose declared integrity-dependency sets are pairwise disjoint. Calling `NavigationSupervisor` without an `IntegrityReport` cannot grant `GPS_DENIED_RESILIENT`.
+
+The bundled research reference profile deliberately grants no source safety credit because it contains no validated vehicle-specific dependency analysis, adapter provenance contract, or timing budget. A platform integration must supply those declarations explicitly.
 
 ## Sensors that can contribute during GNSS denial
 
-The reference profile already provides integration seams for:
+The reference source profile has integration seams for:
 
 - radar-derived map fixes;
 - bathymetric map fixes;
 - visual map fixes;
 - water-relative velocity from a speed log or appropriate DVL mode;
-- ground-velocity measurements where independently available;
+- independently available ground-velocity measurements;
 - surface-current priors;
 - gyrocompass/heading;
 - leveled, gravity-compensated horizontal inertial acceleration.
 
-The repository does not yet implement the raw sensor-processing pipelines that create radar, bathymetric, or visual map fixes. Those are adapter/localization workstreams, not measurements the EKF can manufacture internally.
+The repository does not implement raw radar, bathymetric, visual, LiDAR, DVL, or GNSS RF-processing pipelines that create these normalized observations. Those are adapter/localization workstreams with their own calibration and validation requirements.
+
+## Cross-source contradiction handling
+
+For near-synchronous same-frame absolute-position observations with dependency-disjoint declared source chains, `CrossSourceConsistencyMonitor` evaluates the difference using the combined measurement covariance before the candidate is fused.
+
+A contradiction prevents the disputed candidate from changing the estimator and latches integrity to `ALERT`. Two-source disagreement does not establish which source is wrong. The current software therefore blocks rather than inventing fault attribution.
 
 ## Why an EKF remains useful
 
-An EKF is valuable in GNSS-denied navigation because it provides a principled way to propagate a nonlinear motion model, carry uncertainty forward, and fuse asynchronous measurements with different observation models. In AMEP it also provides the innovation statistics used by the health layer.
+An EKF provides nonlinear state propagation, uncertainty propagation, semantic measurement fusion, and innovation statistics used by the health layer. Those are useful under GNSS denial.
 
-However, an EKF is not an anti-jamming radio, a spoofing detector, or an integrity guarantee. Its usefulness depends on model quality, calibration, timing, sensor independence, and the availability of sufficiently informative non-GNSS constraints.
+An EKF is not an anti-jamming radio, spoof detector, RAIM implementation, or integrity guarantee. Its usefulness depends on model quality, calibration, timing, source dependence, and available non-GNSS constraints.
 
-## Production-facing roadmap
+## Evidence gates
 
 ### Gate A — calibrated inertial front end
 
-Add a validated attitude/INS preprocessing path with explicit coordinate frames, gravity removal, bias handling, clock provenance, lever arms, and boresight calibration. Consider expanding the state to include inertial bias terms once the sensor model and observability requirements are defined.
+Add a validated attitude/INS preprocessing path with explicit coordinate frames, gravity removal, sensor-bias handling, clock provenance, lever arms, boresight calibration, and quantified uncertainty. A production-facing backend should evaluate an expanded inertial state such as position, velocity, attitude, gyro bias, and accelerometer bias rather than feeding raw specific force into the current seven-state filter.
 
 ### Gate B — real non-GNSS aiding
 
-Implement thin adapters for real radar/coastline localization, bathymetric terrain-aided navigation, and/or other independently justified absolute or relative navigation aids. Each adapter must provide timestamps, frames, uncertainty, provenance, and failure status.
+Implement and validate real radar/coastline localization, bathymetric terrain-aided navigation, visual/LiDAR localization, DVL/STW, or other justified navigation aids. Each adapter must produce timestamps, frame/datum, uncertainty, provenance, calibration identity, and failure status.
 
 ### Gate C — fault-hypothesis integrity
 
-Add mechanisms that do not assume every source is independent or unbiased. Candidate research directions include solution separation, explicit bias states, interacting/multiple-model hypotheses, source-dependence graphs, innovation whiteness monitoring, covariance inflation under model mismatch, and integrity tests that compare dissimilar physical observables.
+Extend the current dependency model and pre-fusion contradiction checks with architecture-derived fault hypotheses, solution separation or equivalent FDE, explicit common-cause cases, non-Gaussian sensitivity, false-alert probability, missed-detection probability, and time-to-alert metrics.
 
 ### Gate D — recorded denial replay
 
-Freeze outage/jamming/spoofing intervals and evaluation metrics before testing. Compare against strong same-sensor conventional EKF/UKF baselines and report both accuracy and consistency: RMSE, P95/P99, NIS, NEES, empirical containment, false isolation, missed isolation, and reacquisition behavior.
+Freeze outage/jamming/spoofing intervals and metrics before evaluation. Compare AMEP against strong same-sensor EKF/ESKF/UKF baselines using independently referenced truth and report accuracy and consistency metrics such as RMSE, P95/P99, NIS, NEES, empirical containment, false isolation, missed isolation, and reacquisition behavior.
 
 ### Gate E — HIL and target compute
 
-Validate timestamp handling, sensor dropouts, delayed packets, clock jumps, CPU overload, deadline misses, watchdog behavior, communications loss, and actuator-command gating on the actual compute and representative buses.
+Validate source timing, delayed packets, frozen data, clock jumps, frame mistakes, process overload, deadline misses, watchdog response, communications loss, and command gating on representative buses and target compute. Record WCET/jitter and resource saturation behavior.
 
 ### Gate F — controlled water trials
 
@@ -103,9 +120,9 @@ Progress from benign GNSS-outage trials to controlled denial testing only with i
 
 A defensible current statement is:
 
-> AMEP-1 is an EKF-centered resilient multisensor navigation architecture designed to continue estimating and to manage autonomy authority when GNSS is unavailable or inconsistent, with an explicit engineering objective of operating through active GNSS-denial zones using dissimilar non-GNSS aiding.
+> AMEP-1 is a maritime resilient-PNT research architecture that preserves timing, source identity, dependency assumptions, estimator uncertainty, source health, integrity state, and navigation authority while evaluating GNSS-degraded and GNSS-denied operation.
 
-A statement that is not yet supported is:
+A statement not supported by the repository is:
 
 > AMEP-1 has been proven to navigate real vessels safely through active GNSS jamming or sophisticated spoofing.
 
