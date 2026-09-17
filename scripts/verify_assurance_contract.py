@@ -10,9 +10,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "assurance" / "requirements-to-tests.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
+CODEOWNERS = ROOT / ".github" / "CODEOWNERS"
 FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 USES = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
 TOP_LEVEL_PR_TRIGGER = re.compile(r"(?m)^  pull_request(?:_target)?:")
+TOP_LEVEL_PULL_REQUEST = re.compile(r"(?m)^  pull_request:")
+TOP_LEVEL_PULL_REQUEST_TARGET = re.compile(r"(?m)^  pull_request_target:")
 TRUSTED_PUSH_HEADER = "on:\n  push:\n  workflow_dispatch:\n"
 SELF_HOSTED_RUNNER = "runs-on: [self-hosted, windows, x64, amep]"
 
@@ -132,6 +135,25 @@ def verify_environment_capture() -> list[str]:
     return failures
 
 
+def verify_codeowners() -> list[str]:
+    failures: list[str] = []
+    required = {
+        "/.github/workflows/ @GabrielAllit1",
+        "/.github/CODEOWNERS @GabrielAllit1",
+        "/scripts/verify_assurance_contract.py @GabrielAllit1",
+    }
+    if not CODEOWNERS.is_file():
+        return ["missing .github/CODEOWNERS for CI control-plane ownership"]
+    lines = {
+        line.strip()
+        for line in CODEOWNERS.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    for entry in sorted(required - lines):
+        failures.append(f"CODEOWNERS missing required control-plane owner: {entry}")
+    return failures
+
+
 def verify_self_hosted_runner_boundary() -> list[str]:
     failures: list[str] = []
     workflow_paths = sorted(WORKFLOWS.glob("*.yml")) + sorted(
@@ -158,17 +180,25 @@ def verify_self_hosted_runner_boundary() -> list[str]:
 
     pr_validation = WORKFLOWS / "pr-validation.yml"
     if not pr_validation.is_file():
-        failures.append("missing GitHub-hosted public PR validation workflow")
+        failures.append("missing metadata-only public PR intake workflow")
     else:
         text = pr_validation.read_text(encoding="utf-8")
-        if not TOP_LEVEL_PR_TRIGGER.search(text):
-            failures.append("pr-validation.yml must run for pull_request events")
+        if not TOP_LEVEL_PULL_REQUEST_TARGET.search(text):
+            failures.append("pr-validation.yml must use pull_request_target")
+        if TOP_LEVEL_PULL_REQUEST.search(text):
+            failures.append("pr-validation.yml must not execute on pull_request")
         if _uses_self_hosted_runner(text):
             failures.append("pr-validation.yml must never target a self-hosted runner")
         if "runs-on: windows-latest" not in text:
             failures.append("pr-validation.yml must use GitHub-hosted Windows")
-        if "name: Windows PR validation" not in text:
-            failures.append("pr-validation.yml missing Windows PR validation check")
+        if "actions/checkout@" in text:
+            failures.append("pr-validation.yml must not check out pull-request code")
+        if "name: Public PR intake safety" not in text:
+            failures.append("pr-validation.yml missing Public PR intake safety check")
+        if "External fork pull requests may not modify AMEP CI control-plane files." not in text:
+            failures.append("pr-validation.yml missing external control-plane edit rejection")
+        if "scripts/verify_assurance_contract.py" not in text:
+            failures.append("pr-validation.yml does not protect the assurance verifier")
     return failures
 
 
@@ -177,10 +207,12 @@ def main() -> None:
     requirement_count, requirement_failures = verify_requirements()
     uses_count, workflow_failures = verify_workflow_pins()
     runner_boundary_failures = verify_self_hosted_runner_boundary()
+    codeowner_failures = verify_codeowners()
     failures.extend(requirement_failures)
     failures.extend(workflow_failures)
     failures.extend(verify_environment_capture())
     failures.extend(runner_boundary_failures)
+    failures.extend(codeowner_failures)
 
     result = {
         "status": "PASS" if not failures else "FAIL",
@@ -189,6 +221,7 @@ def main() -> None:
         "self_hosted_runner_boundary": (
             "PASS" if not runner_boundary_failures else "FAIL"
         ),
+        "control_plane_ownership": "PASS" if not codeowner_failures else "FAIL",
         "matrix": str(MATRIX.relative_to(ROOT)),
         "failures": failures,
         "scope": (
