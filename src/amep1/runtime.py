@@ -54,8 +54,130 @@ class AMEPRuntime:
     )
     runtime_policy: RuntimePolicy = field(default_factory=RuntimePolicy)
     hard_fault_reason: str | None = None
+    _configuration_sealed: bool = field(default=False, init=False, repr=False)
+    _sealed_configuration_fingerprint: str | None = field(
+        default=None, init=False, repr=False
+    )
+
+    @property
+    def configuration_sealed(self) -> bool:
+        return self._configuration_sealed
+
+    def _configuration_errors(self) -> tuple[str, ...]:
+        errors: list[str] = []
+        health_sources = set(self.health.configuration())
+        coverage_configuration = self.coverage.configuration()
+        coverage_sources_value = coverage_configuration.get("sources", {})
+        if isinstance(coverage_sources_value, Mapping):
+            coverage_sources = set(str(source) for source in coverage_sources_value)
+        else:
+            coverage_sources = set()
+            errors.append("coverage configuration does not expose a source mapping")
+
+        missing_health = sorted(coverage_sources - health_sources)
+        if missing_health:
+            errors.append(
+                "coverage sources missing health policy: " + ", ".join(missing_health)
+            )
+
+        registry_sources = {descriptor.name for descriptor in self.source_registry.descriptors()}
+        if self.runtime_policy.require_registered_sources:
+            missing_registry = sorted((health_sources | coverage_sources) - registry_sources)
+            if missing_registry:
+                errors.append(
+                    "runtime sources missing registry descriptor: "
+                    + ", ".join(missing_registry)
+                )
+
+        time_configuration = self.time_aligner.configuration()
+        domains_value = time_configuration.get("clock_domains", {})
+        clock_domains = (
+            set(str(name) for name in domains_value)
+            if isinstance(domains_value, Mapping)
+            else set()
+        )
+        for descriptor in self.source_registry.descriptors():
+            if descriptor.clock_domain not in clock_domains:
+                errors.append(
+                    f"source {descriptor.name} references unknown clock domain "
+                    f"{descriptor.clock_domain}"
+                )
+            if isinstance(coverage_sources_value, Mapping):
+                spec_value = coverage_sources_value.get(descriptor.name)
+                if isinstance(spec_value, Mapping):
+                    declared_absolute = bool(spec_value.get("absolute_position", False))
+                    declared_gnss = bool(spec_value.get("gnss", False))
+                    if declared_absolute != descriptor.absolute_position:
+                        errors.append(
+                            f"source {descriptor.name} absolute-position contract mismatch"
+                        )
+                    if declared_gnss != descriptor.gnss:
+                        errors.append(f"source {descriptor.name} GNSS contract mismatch")
+
+        snapshot = self.estimator.snapshot()
+        covariance = np.asarray(snapshot.covariance, dtype=float)
+        if covariance.shape != (self.coverage.state_dim, self.coverage.state_dim):
+            errors.append(
+                "estimator snapshot covariance dimension does not match "
+                f"coverage state_dim={self.coverage.state_dim}"
+            )
+        if len(snapshot.covariance_labels) != self.coverage.state_dim:
+            errors.append(
+                "estimator covariance label count does not match coverage state_dim"
+            )
+        if (
+            self.supervisor.policy.full_rank is not None
+            and self.supervisor.policy.full_rank > self.coverage.state_dim
+        ):
+            errors.append("navigation full_rank exceeds coverage state_dim")
+        if self.supervisor.policy.degraded_rank > self.coverage.state_dim:
+            errors.append("navigation degraded_rank exceeds coverage state_dim")
+        if self.integrity.policy.minimum_navigation_rank > self.coverage.state_dim:
+            errors.append("integrity minimum_navigation_rank exceeds coverage state_dim")
+        return tuple(errors)
+
+    def seal_configuration(self) -> str:
+        """Validate and fingerprint behavior-affecting runtime configuration.
+
+        Sealing is an assurance boundary, not cryptographic immutability. Runtime
+        operations compare the live configuration fingerprint with the sealed
+        fingerprint and fail closed if a registered policy, source dependency,
+        clock domain, estimator configuration, or other manifested setting drifts.
+        """
+        errors = self._configuration_errors()
+        if errors:
+            raise ValueError("configuration seal rejected: " + "; ".join(errors))
+        fingerprint = self.configuration_fingerprint()
+        self._sealed_configuration_fingerprint = fingerprint
+        self._configuration_sealed = True
+        return fingerprint
+
+    def _configuration_fault_reason(self) -> str | None:
+        if not self.runtime_policy.require_configuration_seal:
+            return None
+        if not self._configuration_sealed or self._sealed_configuration_fingerprint is None:
+            return "configuration_unsealed"
+        try:
+            current = self.configuration_fingerprint()
+        except (TypeError, ValueError):
+            return "configuration_fingerprint_failed"
+        if current != self._sealed_configuration_fingerprint:
+            return "sealed_configuration_changed"
+        return None
+
+    def _enforce_configuration_ready(self) -> None:
+        reason = self._configuration_fault_reason()
+        if reason is None:
+            return
+        self.supervisor.force_safe_hold(f"configuration_fault:{reason}")
+        if reason != "configuration_unsealed":
+            self.hard_fault_reason = f"configuration_fault:{reason}"
+        raise RuntimeError(
+            "runtime configuration is not ready for data processing: " + reason
+        )
 
     def predict(self, prediction_input: object) -> float:
+        self._enforce_configuration_ready()
         try:
             return self.estimator.predict(prediction_input)
         except (TimebaseError, ValueError, TypeError) as exc:
@@ -64,7 +186,7 @@ class AMEPRuntime:
             raise
 
     def clear_hard_fault(self) -> None:
-        """Explicit recovery hook after the prediction-fault root cause is handled."""
+        """Explicit recovery hook after the prediction/configuration fault is handled."""
         self.hard_fault_reason = None
 
     def configuration_manifest(self) -> dict[str, JSONValue]:
@@ -137,6 +259,7 @@ class AMEPRuntime:
         values: np.ndarray,
         covariance: np.ndarray,
     ) -> MeasurementResult:
+        self._enforce_configuration_ready()
         self._require_legacy_direct_updates()
         result = self.estimator.update_measurement(
             kind,
@@ -269,6 +392,7 @@ class AMEPRuntime:
         now_s: float | None = None,
     ) -> IngestResult:
         """Align, validate, cross-check, backend-update, and account a measurement."""
+        self._enforce_configuration_ready()
         alignment = self.time_aligner.align(envelope, now_s=now_s, commit=False)
         if not alignment.accepted or alignment.measurement is None:
             return IngestResult(False, alignment.reason, alignment, None)
@@ -335,12 +459,16 @@ class AMEPRuntime:
         if timestamp is not None:
             self.health.refresh(timestamp)
         coverage = self.coverage.compute(self.health.states())
+        configuration_fault = self._configuration_fault_reason()
+        hard_fault_reason = self.hard_fault_reason
+        if hard_fault_reason is None and configuration_fault is not None:
+            hard_fault_reason = f"configuration_fault:{configuration_fault}"
         return self.integrity.evaluate(
             timestamp_s=timestamp,
             coverage=coverage,
             sensor_health=self.health.states(),
             containment_proxy_m=self.estimator.containment_proxy(),
-            hard_fault_reason=self.hard_fault_reason,
+            hard_fault_reason=hard_fault_reason,
             source_registry=self.source_registry,
             consistency=self.consistency.last_report,
         )
@@ -351,12 +479,16 @@ class AMEPRuntime:
             self.health.refresh(timestamp)
         states = self.health.states()
         coverage = self.coverage.compute(states)
+        configuration_fault = self._configuration_fault_reason()
+        hard_fault_reason = self.hard_fault_reason
+        if hard_fault_reason is None and configuration_fault is not None:
+            hard_fault_reason = f"configuration_fault:{configuration_fault}"
         integrity = self.integrity.evaluate(
             timestamp_s=timestamp,
             coverage=coverage,
             sensor_health=states,
             containment_proxy_m=self.estimator.containment_proxy(),
-            hard_fault_reason=self.hard_fault_reason,
+            hard_fault_reason=hard_fault_reason,
             source_registry=self.source_registry,
             consistency=self.consistency.last_report,
         )
