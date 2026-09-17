@@ -63,8 +63,9 @@ jobs:
       - name: Test with coverage
         run: python -m pytest --cov=amep1 --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
-      - name: Upload assurance artifacts
+      - name: Upload assurance artifacts (best effort)
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: amep-assurance-${{ github.run_id }}
