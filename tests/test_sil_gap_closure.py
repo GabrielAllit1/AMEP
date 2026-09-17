@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from amep1 import (
+    DetectionTrial,
     NMEA0183Adapter,
     NMEA0183StreamDecoder,
     RiskAllocation,
@@ -16,7 +17,6 @@ from amep1 import (
     StrapdownESKF,
     StrapdownESKFConfig,
     StrapdownIMUInput,
-    DetectionTrial,
     derive_fault_hypotheses,
     parse_nmea0183_sentence,
     summarize_detection_trials,
