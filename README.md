@@ -6,6 +6,12 @@ AMEP-1 combines a seven-state maritime reference estimator with explicit contrac
 
 > **Maturity:** Research software / software-in-the-loop (SIL) prototype. This repository is not a certified PNT, integrity, collision-avoidance, flight-control, vessel-control, or safety-of-life product.
 
+**Project:** SALT19  
+**Full-stack architect:** Gabriel V. Allit  
+**AMEP-1 researcher / Version 1.0 author:** Gabriel V. Allit  
+**Research DOI:** [10.5281/zenodo.22561851](https://doi.org/10.5281/zenodo.22561851)  
+**Engineering wiki:** [`docs/wiki/README.md`](docs/wiki/README.md) — multidisciplinary system documentation for mechanical, electrical, navigation/PNT, communications/RF, embedded/real-time, controls/autonomy, software, verification, and safety engineers.
+
 ## Mission
 
 GNSS denial is treated as a navigation-information and integrity problem rather than a single-sensor replacement problem. AMEP preserves source identity, timing, covariance, provenance, declared dependencies, health, integrity state, and navigation authority through the fusion path.
@@ -143,7 +149,7 @@ python -m bandit -q -r src/amep1
 python -m pytest --cov=amep1 --cov-report=term-missing --cov-fail-under=75
 ```
 
-CI runs on the repository-specific self-hosted Windows runner and also audits direct runtime dependencies and generates a CycloneDX SBOM artifact. A passing CI run is software evidence only; it is not field or safety evidence.
+CI is orchestrated through GitHub Actions, but all job execution occurs on the repository-specific AMEP self-hosted Windows runner; no GitHub-hosted runner compute is used. The pipeline also audits direct runtime dependencies and generates a CycloneDX SBOM. A passing CI run is software evidence only; it is not field or safety evidence.
 
 ## Production-hardening gates
 
