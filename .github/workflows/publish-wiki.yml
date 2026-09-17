@@ -1,0 +1,40 @@
+name: Publish Engineering Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - "scripts/publish_wiki.ps1"
+      - ".github/workflows/publish-wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: amep-wiki-publish
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish GitHub Wiki
+    runs-on: [self-hosted, windows, x64, amep]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout canonical documentation
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Publish docs/wiki to GitHub Wiki
+        shell: pwsh
+        env:
+          AMEP_WIKI_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./scripts/publish_wiki.ps1 `
+            -Repository "${{ github.repository }}" `
+            -Token $env:AMEP_WIKI_TOKEN `
+            -SourceDir "docs/wiki"
