@@ -85,12 +85,31 @@
       ]
     },
     {
+      "id": "AMEP-INS-002",
+      "statement": "The compensated local-level ESKF shall expose executable coning/sculling compensation, WGS-84 curvature and transport-rate mechanization, and lever-arm-aware position/velocity observation Jacobians including optional raw-IMU gyro-bias coupling.",
+      "claim_boundary": "Higher-fidelity SIL reference mechanization only; coefficients, sample timing, flexure, installation values, and IMU characteristics remain unvalidated for a physical vessel.",
+      "tests": [
+        "tests/test_final_sil_gaps.py::test_coning_sculling_compensation_uses_previous_and_current_increments",
+        "tests/test_final_sil_gaps.py::test_compensated_eskf_stationary_and_transport_rate_geometry",
+        "tests/test_final_sil_gaps.py::test_lever_arm_position_and_velocity_models_include_attitude_jacobians",
+        "tests/test_final_sil_gaps.py::test_raw_imu_velocity_lever_arm_model_couples_gyro_bias"
+      ]
+    },
+    {
       "id": "AMEP-FDE-001",
       "statement": "The SIL integrity research layer shall derive fault hypotheses from declared source dependencies, support explicit per-hypothesis integrity-risk bookkeeping, evaluate covariance-aware horizontal solution separation, and summarize false-alert, missed-detection, and time-to-alert trial metrics.",
       "claim_boundary": "Generic SIL FDE framework only; hypotheses are not a verified vessel fault tree and the outputs are not validated protection levels.",
       "tests": [
         "tests/test_sil_gap_closure.py::test_dependency_derived_fde_risk_allocation_and_solution_separation",
         "tests/test_sil_gap_closure.py::test_fde_detection_metrics_report_false_alert_miss_and_time_to_alert"
+      ]
+    },
+    {
+      "id": "AMEP-FDE-002",
+      "statement": "The SIL FDE layer shall be able to generate each hypothesis-excluded navigation solution by replaying the same prediction and non-excluded measurement events through fresh runtime instances, then evaluate the generated alternatives with the declared risk allocation.",
+      "claim_boundary": "Deterministic SIL subset-solution generation only; shared-solution cross-covariance, real fault priors, validated protection levels, and operational detection performance are not established.",
+      "tests": [
+        "tests/test_final_sil_gaps.py::test_multi_hypothesis_replay_generates_subset_solutions_from_events"
       ]
     },
     {
