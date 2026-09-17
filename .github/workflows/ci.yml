@@ -12,7 +12,7 @@ permissions:
 jobs:
   test:
     name: Python 3.11
-    runs-on: [self-hosted, linux, x64, amep]
+    runs-on: [self-hosted, windows, x64, amep]
     timeout-minutes: 20
 
     steps:
