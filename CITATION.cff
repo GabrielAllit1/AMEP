@@ -6,7 +6,8 @@ authors:
   - family-names: Allit
     given-names: Gabriel V.
     orcid: "https://orcid.org/0009-0008-2365-226X"
-version: "0.3.0.dev0"
+version: "0.3.0"
+date-released: 2026-09-17
 repository-code: "https://github.com/GabrielAllit1/AMEP"
 keywords:
   - resilient PNT
