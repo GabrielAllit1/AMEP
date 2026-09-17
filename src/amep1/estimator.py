@@ -98,11 +98,11 @@ class AMEPFilter:
         F[2, 6] = a_N * dt
         F[3, 6] = -a_E * dt
 
-        pn = self.config.process_noise
-        q_pos = (pn.q_pos_coef * dt) ** 2
-        q_vel = (pn.q_vel_coef * np.sqrt(dt)) ** 2
-        q_cur = (pn.q_current_coef * np.sqrt(dt)) ** 2
-        q_head = (pn.q_heading_coef_rad * np.sqrt(dt)) ** 2
+        process_noise = self.config.process_noise
+        q_pos = (process_noise.q_pos_coef * dt) ** 2
+        q_vel = (process_noise.q_vel_coef * np.sqrt(dt)) ** 2
+        q_cur = (process_noise.q_current_coef * np.sqrt(dt)) ** 2
+        q_head = (process_noise.q_heading_coef_rad * np.sqrt(dt)) ** 2
         Q = np.diag([q_pos, q_pos, q_vel, q_vel, q_cur, q_cur, q_head])
 
         self.P = nearest_psd(
@@ -123,27 +123,31 @@ class AMEPFilter:
         z = np.asarray(z, dtype=float).reshape(-1)
         H = np.asarray(H, dtype=float)
         R = np.asarray(R, dtype=float)
-        m = z.size
-        if H.shape != (m, 7):
-            raise ValueError(f"H must have shape {(m, 7)}, got {H.shape}")
-        if R.shape != (m, m):
-            raise ValueError(f"R must have shape {(m, m)}, got {R.shape}")
+        dimension = z.size
+        if H.shape != (dimension, 7):
+            raise ValueError(f"H must have shape {(dimension, 7)}, got {H.shape}")
+        if R.shape != (dimension, dimension):
+            raise ValueError(
+                f"R must have shape {(dimension, dimension)}, got {R.shape}"
+            )
         require_finite("z", z)
         require_finite("H", H)
         require_finite("R", R)
         if np.min(np.linalg.eigvalsh(symmetrize(R))) <= 0:
             raise ValueError("R must be positive definite")
 
-        r = z - H @ self.x
+        residual = z - H @ self.x
         for row in angle_rows:
-            r[row] = wrap_angle(r[row])
-        S = nearest_psd(H @ self.P @ H.T + R, self.config.covariance_eigen_floor)
+            residual[row] = wrap_angle(residual[row])
+        innovation_covariance = nearest_psd(
+            H @ self.P @ H.T + R, self.config.covariance_eigen_floor
+        )
 
-        factor = cho_factor(S, lower=True, check_finite=True)
-        solved_r = cho_solve(factor, r)
-        nis = float(r.T @ solved_r)
-        threshold = float(chi2.ppf(self.config.gate_probability, df=m))
-        return r, S, nis, threshold
+        factor = cho_factor(innovation_covariance, lower=True, check_finite=True)
+        solved_residual = cho_solve(factor, residual)
+        nis = float(residual.T @ solved_residual)
+        threshold = float(chi2.ppf(self.config.gate_probability, df=dimension))
+        return residual, innovation_covariance, nis, threshold
 
     def evaluate_measurement(
         self,
@@ -176,35 +180,55 @@ class AMEPFilter:
         angle_rows: tuple[int, ...] = (),
         allow_fusion: bool = True,
     ) -> MeasurementResult:
-        r, S, nis, threshold = self._innovation(z, H, R, angle_rows=angle_rows)
+        residual, innovation_covariance, nis, threshold = self._innovation(
+            z, H, R, angle_rows=angle_rows
+        )
         accepted = nis <= threshold
         if not accepted:
             return MeasurementResult(
-                source, False, False, nis, threshold, np.asarray(z).size, "innovation_rejected"
+                source,
+                False,
+                False,
+                nis,
+                threshold,
+                np.asarray(z).size,
+                "innovation_rejected",
             )
         if not allow_fusion:
             return MeasurementResult(
-                source, True, False, nis, threshold, np.asarray(z).size, "accepted_probe_only"
+                source,
+                True,
+                False,
+                nis,
+                threshold,
+                np.asarray(z).size,
+                "accepted_probe_only",
             )
 
         H = np.asarray(H, dtype=float)
         R = np.asarray(R, dtype=float)
-        factor = cho_factor(S, lower=True, check_finite=True)
+        factor = cho_factor(innovation_covariance, lower=True, check_finite=True)
         PHt = self.P @ H.T
-        K = cho_solve(factor, PHt.T).T
-        self.x = self.x + K @ r
+        gain = cho_solve(factor, PHt.T).T
+        self.x = self.x + gain @ residual
         self.x[6] = wrap_angle(self.x[6])
 
-        I = np.eye(7, dtype=float)
-        KH = K @ H
+        identity = np.eye(7, dtype=float)
+        KH = gain @ H
         self.P = nearest_psd(
-            (I - KH) @ self.P @ (I - KH).T + K @ R @ K.T,
+            (identity - KH) @ self.P @ (identity - KH).T + gain @ R @ gain.T,
             self.config.covariance_eigen_floor,
         )
         require_finite("updated state", self.x)
         require_finite("updated covariance", self.P)
         return MeasurementResult(
-            source, True, True, nis, threshold, np.asarray(z).size, "accepted_and_fused"
+            source,
+            True,
+            True,
+            nis,
+            threshold,
+            np.asarray(z).size,
+            "accepted_and_fused",
         )
 
     def update_measurement(
@@ -218,7 +242,7 @@ class AMEPFilter:
         metadata: Mapping[str, object] | None = None,
         allow_fusion: bool = True,
     ) -> MeasurementResult:
-        """Apply one semantic measurement without exposing the 7-state layout."""
+        """Apply one semantic measurement without exposing the seven-state layout."""
         del metadata
         if kind not in self.measurement_kinds:
             raise ValueError(f"unsupported AMEPFilter measurement kind: {kind}")
@@ -245,8 +269,8 @@ class AMEPFilter:
                 f"measurement kind {kind} requires dimension {dimension}, got {z.size}"
             )
         H = np.zeros((dimension, 7), dtype=float)
-        for row, col, value in entries:
-            H[row, col] = value
+        for row, column, value in entries:
+            H[row, column] = value
         return self.update(
             z,
             H,
@@ -256,34 +280,93 @@ class AMEPFilter:
             allow_fusion=allow_fusion,
         )
 
-    def update_position(self, E: float, N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
+    def update_position(
+        self,
+        E: float,
+        N: float,
+        sigma: float,
+        *,
+        source: str,
+        allow_fusion: bool = True,
+    ) -> MeasurementResult:
         return self.update_measurement(
-            "position", np.array([E, N]), np.eye(2) * float(sigma) ** 2,
-            frame="local_ENU", source=source, allow_fusion=allow_fusion,
+            "position",
+            np.array([E, N]),
+            np.eye(2) * float(sigma) ** 2,
+            frame="local_ENU",
+            source=source,
+            allow_fusion=allow_fusion,
         )
 
-    def update_water_velocity(self, Vw_E: float, Vw_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
+    def update_water_velocity(
+        self,
+        Vw_E: float,
+        Vw_N: float,
+        sigma: float,
+        *,
+        source: str,
+        allow_fusion: bool = True,
+    ) -> MeasurementResult:
         return self.update_measurement(
-            "water_velocity", np.array([Vw_E, Vw_N]), np.eye(2) * float(sigma) ** 2,
-            frame="local_ENU", source=source, allow_fusion=allow_fusion,
+            "water_velocity",
+            np.array([Vw_E, Vw_N]),
+            np.eye(2) * float(sigma) ** 2,
+            frame="local_ENU",
+            source=source,
+            allow_fusion=allow_fusion,
         )
 
-    def update_ground_velocity(self, Vg_E: float, Vg_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
+    def update_ground_velocity(
+        self,
+        Vg_E: float,
+        Vg_N: float,
+        sigma: float,
+        *,
+        source: str,
+        allow_fusion: bool = True,
+    ) -> MeasurementResult:
         return self.update_measurement(
-            "ground_velocity", np.array([Vg_E, Vg_N]), np.eye(2) * float(sigma) ** 2,
-            frame="local_ENU", source=source, allow_fusion=allow_fusion,
+            "ground_velocity",
+            np.array([Vg_E, Vg_N]),
+            np.eye(2) * float(sigma) ** 2,
+            frame="local_ENU",
+            source=source,
+            allow_fusion=allow_fusion,
         )
 
-    def update_current_prior(self, C_E: float, C_N: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
+    def update_current_prior(
+        self,
+        C_E: float,
+        C_N: float,
+        sigma: float,
+        *,
+        source: str,
+        allow_fusion: bool = True,
+    ) -> MeasurementResult:
         return self.update_measurement(
-            "current_prior", np.array([C_E, C_N]), np.eye(2) * float(sigma) ** 2,
-            frame="local_ENU", source=source, allow_fusion=allow_fusion,
+            "current_prior",
+            np.array([C_E, C_N]),
+            np.eye(2) * float(sigma) ** 2,
+            frame="local_ENU",
+            source=source,
+            allow_fusion=allow_fusion,
         )
 
-    def update_heading(self, psi: float, sigma: float, *, source: str, allow_fusion: bool = True) -> MeasurementResult:
+    def update_heading(
+        self,
+        psi: float,
+        sigma: float,
+        *,
+        source: str,
+        allow_fusion: bool = True,
+    ) -> MeasurementResult:
         return self.update_measurement(
-            "heading", np.array([psi]), np.array([[float(sigma) ** 2]]),
-            frame="local_ENU", source=source, allow_fusion=allow_fusion,
+            "heading",
+            np.array([psi]),
+            np.array([[float(sigma) ** 2]]),
+            frame="local_ENU",
+            source=source,
+            allow_fusion=allow_fusion,
         )
 
     @property
@@ -299,15 +382,25 @@ class AMEPFilter:
         return float(self.x[6])
 
     def snapshot(self) -> EstimatorSnapshot:
-        vg_e, vg_n = self.ground_velocity
+        ground_velocity_e, ground_velocity_n = self.ground_velocity
         return EstimatorSnapshot(
             frame="local_ENU",
             east_m=float(self.x[0]),
             north_m=float(self.x[1]),
-            ground_velocity_e_mps=vg_e,
-            ground_velocity_n_mps=vg_n,
+            ground_velocity_e_mps=ground_velocity_e,
+            ground_velocity_n_mps=ground_velocity_n,
             heading_rad=float(self.x[6]),
             covariance=self.P.copy(),
+            state_schema_id="amep1.horizontal.v1",
+            covariance_labels=(
+                "E_m",
+                "N_m",
+                "Vw_E_mps",
+                "Vw_N_mps",
+                "C_E_mps",
+                "C_N_mps",
+                "heading_rad",
+            ),
             water_velocity_e_mps=float(self.x[2]),
             water_velocity_n_mps=float(self.x[3]),
             current_e_mps=float(self.x[4]),
@@ -315,7 +408,7 @@ class AMEPFilter:
         )
 
     def containment_proxy(self) -> float:
-        P_EN = symmetrize(self.P[:2, :2])
-        lam_max = float(np.max(np.linalg.eigvalsh(P_EN)))
+        position_covariance = symmetrize(self.P[:2, :2])
+        largest_eigenvalue = float(np.max(np.linalg.eigvalsh(position_covariance)))
         threshold = float(chi2.ppf(self.config.containment_probability, df=2))
-        return float(np.sqrt(max(0.0, threshold * lam_max)))
+        return float(np.sqrt(max(0.0, threshold * largest_eigenvalue)))
