@@ -123,7 +123,7 @@ class RiskAllocation:
         *,
         total_integrity_risk: float,
         residual_fraction: float = 0.10,
-    ) -> "RiskAllocation":
+    ) -> RiskAllocation:
         if not hypotheses:
             raise ValueError("at least one fault hypothesis is required")
         if not isfinite(residual_fraction) or not 0.0 <= residual_fraction < 1.0:
@@ -200,7 +200,9 @@ class SolutionSeparationMonitor:
     ) -> SolutionSeparationReport:
         primary_position = np.asarray(primary_position_m, dtype=float).reshape(2)
         primary_covariance = np.asarray(primary_covariance_m2, dtype=float).reshape(2, 2)
-        if not np.all(np.isfinite(primary_position)) or not np.all(np.isfinite(primary_covariance)):
+        if not np.all(np.isfinite(primary_position)) or not np.all(
+            np.isfinite(primary_covariance)
+        ):
             raise ValueError("primary solution contains non-finite values")
         if np.min(np.linalg.eigvalsh(symmetrize(primary_covariance))) <= 0.0:
             raise ValueError("primary covariance must be positive definite")
@@ -214,8 +216,10 @@ class SolutionSeparationMonitor:
             combined = nearest_psd(primary_covariance + covariance, 1e-15)
             factor = cho_factor(combined, lower=True, check_finite=True)
             statistic = float(residual.T @ cho_solve(factor, residual))
-            alpha = None if risk_allocation is None else risk_allocation.allocation_for(
-                candidate.hypothesis.name
+            alpha = (
+                None
+                if risk_allocation is None
+                else risk_allocation.allocation_for(candidate.hypothesis.name)
             )
             probability = self.default_probability if alpha is None else 1.0 - alpha
             probability = min(max(probability, 0.5000001), 1.0 - 1e-15)
