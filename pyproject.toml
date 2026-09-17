@@ -35,9 +35,22 @@ dependencies = [
 test = [
   "pytest>=8.0"
 ]
-
+qa = [
+  "bandit>=1.7",
+  "cyclonedx-bom>=5.0",
+  "mypy>=1.13",
+  "pip-audit>=2.7",
+  "pytest-cov>=5.0",
+  "ruff>=0.8"
+]
 dev = [
-  "pytest>=8.0"
+  "pytest>=8.0",
+  "bandit>=1.7",
+  "cyclonedx-bom>=5.0",
+  "mypy>=1.13",
+  "pip-audit>=2.7",
+  "pytest-cov>=5.0",
+  "ruff>=0.8"
 ]
 
 [project.urls]
@@ -50,3 +63,18 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_configs = true
+show_error_codes = true
