@@ -1,0 +1,5 @@
+# AMEP repository control-plane ownership.
+# These paths define or verify CI trust boundaries and should be reviewed by the repository owner.
+/.github/workflows/ @GabrielAllit1
+/.github/CODEOWNERS @GabrielAllit1
+/scripts/verify_assurance_contract.py @GabrielAllit1
