@@ -23,9 +23,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Verify Python runtime
+      - name: Verify self-hosted runtime
         shell: pwsh
         run: |
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "Machine: $env:COMPUTERNAME"
           python --version
           python -c "import sys; assert sys.version_info >= (3, 10), sys.version"
           python -m pip --version
@@ -63,13 +65,16 @@ jobs:
       - name: Test with coverage
         run: python -m pytest --cov=amep1 --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
-      - name: Upload assurance artifacts (best effort)
+      - name: Persist assurance artifacts on self-hosted runner
         if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v4
-        with:
-          name: amep-assurance-${{ github.run_id }}
-          path: |
-            coverage.xml
-            sbom.cdx.json
-          if-no-files-found: warn
+        shell: pwsh
+        run: |
+          $runnerRoot = Split-Path -Parent $env:RUNNER_WORKSPACE
+          $artifactRoot = Join-Path $runnerRoot "_artifacts\AMEP\$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+          foreach ($file in @('coverage.xml', 'sbom.cdx.json')) {
+            if (Test-Path $file) {
+              Copy-Item $file -Destination $artifactRoot -Force
+            }
+          }
+          Write-Host "AMEP assurance artifacts: $artifactRoot"
