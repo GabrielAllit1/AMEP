@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any
 
 from .enums import AuthoritySource, NavMode
 from .types import AuthorityDecision, CoverageResult

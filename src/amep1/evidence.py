@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
-from importlib import metadata
 import json
-from pathlib import Path
 import sys
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from importlib import metadata
+from pathlib import Path
+from typing import Any
 
 
 JSONScalar = str | int | float | bool | None
@@ -166,7 +167,7 @@ class EvidenceLog:
         return EvidenceVerification(True, count)
 
     @classmethod
-    def from_jsonl(cls, text: str) -> "EvidenceLog":
+    def from_jsonl(cls, text: str) -> EvidenceLog:
         log = cls()
         records: list[EvidenceRecord] = []
         for line in text.splitlines():

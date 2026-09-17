@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Iterable
 
 from .evidence import EvidenceLog, EvidenceRecord, JSONValue
 from .runtime import AMEPRuntime

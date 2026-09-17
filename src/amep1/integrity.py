@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
-from typing import Mapping
 
 from .consistency import ConsistencyReport
 from .enums import SensorHealth
