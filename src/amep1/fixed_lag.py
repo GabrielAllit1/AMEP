@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from math import isfinite
+from numbers import Real
 from typing import Any
 
 import numpy as np
@@ -152,6 +153,8 @@ class FixedLagBackendAdapter:
                 f"measurement metadata must contain {self.timestamp_metadata_key!r} "
                 "before the first prediction"
             )
+        if not isinstance(timestamp, Real):
+            raise TypeError("measurement timestamp must be a real number")
         value = float(timestamp)
         if not isfinite(value):
             raise ValueError("measurement timestamp must be finite")
