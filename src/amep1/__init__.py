@@ -1,3 +1,4 @@
+from .advanced_inertial import CompensatedStrapdownESKF, compensate_coning_sculling
 from .authority import NavigationPolicy, NavigationSupervisor
 from .backend import DelayedMeasurementBackend, EstimatorBackend, EstimatorSnapshot
 from .comms import CommunicationsSupervisor, LinkPolicy
@@ -29,6 +30,11 @@ from .fde import (
     SolutionSeparationReport,
     derive_fault_hypotheses,
     summarize_detection_trials,
+)
+from .fde_replay import (
+    HypothesisReplayResult,
+    MultiHypothesisReplay,
+    MultiHypothesisReplayResult,
 )
 from .health import SensorHealthManager
 from .inertial import StrapdownESKF, StrapdownESKFConfig, StrapdownIMUInput
@@ -85,6 +91,7 @@ __all__ = [
     "AuthoritySource",
     "ClockDomain",
     "CommunicationsSupervisor",
+    "CompensatedStrapdownESKF",
     "ConsistencyPolicy",
     "ConsistencyReport",
     "ConstraintCoverage",
@@ -104,6 +111,7 @@ __all__ = [
     "EvidenceVerification",
     "FaultHypothesis",
     "HorizontalIMUInput",
+    "HypothesisReplayResult",
     "IngestResult",
     "IntegrityEngine",
     "IntegrityPolicy",
@@ -112,6 +120,8 @@ __all__ = [
     "LinkPolicy",
     "MeasurementEnvelope",
     "MeasurementResult",
+    "MultiHypothesisReplay",
+    "MultiHypothesisReplayResult",
     "NMEA0183Adapter",
     "NMEA0183AdapterConfig",
     "NMEA0183StreamDecoder",
@@ -154,6 +164,7 @@ __all__ = [
     "build_research_reference_runtime",
     "build_research_reference_source_registry",
     "canonical_fingerprint",
+    "compensate_coning_sculling",
     "derive_fault_hypotheses",
     "parse_nmea0183_sentence",
     "software_identity",
