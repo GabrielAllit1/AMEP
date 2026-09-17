@@ -1,75 +1,88 @@
 # AMEP Production-Hardening Baseline — September 2026
 
-AMEP is being evolved from a maritime SIL research kernel into a modular resilient-PNT assurance architecture that can host platform-specific navigation estimators for multiple autonomous-system classes. This document records the research and standards basis for that evolution and separates implemented software contracts from future evidence gates.
+This document records the engineering rationale, implemented hardening contracts, and remaining evidence gates for AMEP-1. The executable reference estimator remains a horizontal maritime research model. The surrounding timing, source-dependency, integrity, replay, and output interfaces are intended to support replacement estimator backends without asserting that one vehicle dynamics model is universal.
 
-**Scope boundary:** this work addresses navigation estimation, integrity, timing, replay, modular interfaces, degradation, and assurance. It does not implement targeting, weapon employment, or autonomous lethal decision functions.
+## 1. Scope and evidence boundary
 
-## 1. Current executable baseline
+AMEP currently addresses:
 
-The current reference estimator is still maritime and horizontal:
+- navigation estimation;
+- measurement and time provenance;
+- source health and dependency declarations;
+- cross-source consistency;
+- navigation-integrity state;
+- deterministic degradation and authority gating;
+- replay and software evidence;
+- replaceable estimator interfaces.
+
+It does not establish certified PNT integrity, validated protection levels, operational vessel safety, collision avoidance, target-hardware real-time guarantees, or field performance under active jamming/spoofing.
+
+The current reference estimator is:
 
 ```text
 x = [E, N, Vw_E, Vw_N, C_E, C_N, psi]^T
 ```
 
-That state model is **not** asserted to be universal. The portable layer is now the contract around it: semantic measurement envelopes, time alignment, backend capability discovery, backend-owned measurement models and frames, source dependency declarations, health, constraint coverage, integrity, mode authority, deterministic replay, and evidence-bounded PNT output.
+That state definition is maritime and horizontal. `EstimatorBackend` is the portability boundary; a replacement backend owns its state dimension, prediction input, observation models, accepted frames, covariance schema, and estimator-specific validation evidence.
 
-`EstimatorBackend` no longer exposes a seven-state `H` matrix to runtime. A backend declares the measurement kinds and frames it accepts, owns its state dimension and observation models, and returns a portable `EstimatorSnapshot`. This is the architectural seam for a future 15-state/18-state ESKF, invariant filter, UUV estimator, UAV estimator, UGV estimator, or other platform-specific navigation backend.
+## 2. Engineering rationale
 
-## 2. Research and standards findings that drive the architecture
+### 2.1 Integrity is separate from estimation accuracy
 
-### Confidence and integrity are first-class outputs
+Robust navigation requires both a state estimate and evidence about whether that estimate can be trusted for the intended mode. NIS, covariance, source freshness, and estimator convergence are useful inputs but are not by themselves an integrity argument.
 
-Stanford's Navigation and Autonomous Vehicles Lab frames robust multisensor navigation as an accuracy **and confidence** problem and explicitly studies faults in GPS, LiDAR, camera and inertial fusion. Stanford's RAIM/ARAIM work likewise treats redundant measurements and integrity reasoning as separate from simply obtaining a converged estimate.
+AMEP therefore keeps source health, source dependency assumptions, pre-fusion consistency, integrity state, and navigation authority outside the estimator implementation.
 
-**AMEP implication:** health, covariance and NIS are necessary but not sufficient. Runtime must know whether evidence is actually diverse, whether independent sources contradict each other, and whether the system has enough integrity evidence to grant autonomy authority.
+### 2.2 Common-cause faults invalidate naive sensor counting
 
-### Common-cause errors defeat naive multisensor redundancy
+AMEP v1.0 demonstrated severe covariance overconfidence under correlated common-mode absolute-position bias. Multiple named sources can share a receiver chain, RF environment, clock, map, calibration, preprocessing service, compute process, network, or power domain.
 
-AMEP v1.0 demonstrated this directly: mutually consistent biased absolute-position sources can preserve plausible innovations while the state is wrong and covariance is severely overconfident. Contemporary integrity research continues to study multiple-fault hypotheses, heavy-tailed/non-Gaussian errors and explicit integrity bounding rather than relying on a single Gaussian outlier model.
+The hardened source model therefore includes:
 
-**AMEP implication:** two healthy sensor names do not equal two independent sources. Sources can share a receiver chain, RF environment, clock, map, calibration, preprocessing service, network, compute process, power rail or other common cause.
+- a primary failure domain;
+- optional shared dependency tokens;
+- clock-domain expectations;
+- provenance requirements;
+- timestamp-uncertainty limits;
+- explicit opt-in safety credit.
 
-This tranche therefore models:
+Two sources are not treated as independent merely because they have different names.
 
-- a primary failure domain per source;
-- additional shared dependency tokens;
-- whether a source receives safety credit;
-- the largest pairwise dependency-disjoint source subset.
+### 2.3 Timing must survive interface boundaries
 
-`GPS_DENIED_RESILIENT` is no longer earned by 7/7 local state coverage alone. Under the reference policy, it requires at least two ONLINE non-GNSS absolute-position sources whose declared integrity-dependency sets are pairwise disjoint. Anything less is downgraded rather than described as resilient.
+`MeasurementEnvelope` preserves source time, receive time, clock domain, timestamp uncertainty, sequence, provenance, frame, covariance, and metadata. `TimeAligner` validates and normalizes timing before estimator fusion.
 
-These declarations are an engineering model, not proof of statistical independence. A real vehicle must derive them from its actual architecture and validate the assumptions.
+Replay reproduces measurement processing in recorded receive-time order. Source timestamps are normalized by the same online time-alignment path rather than being used directly as a global ordering key.
 
-### Asynchronous and delayed measurements should not be hidden inside callback timing
+### 2.4 Portable interfaces must not expose one estimator's state layout
 
-CMU/MIT/Georgia Tech factor-graph work provides a clean model for multi-rate, asynchronous and delayed navigation measurements and concurrent filtering/smoothing.
+Runtime consumes semantic measurements and `EstimatorSnapshot`; it does not build seven-state observation matrices. `ConstraintCoverage` accepts a configurable state dimension, and estimator snapshots publish a `state_schema_id` plus ordered covariance labels.
 
-**AMEP implication:** the deterministic low-latency estimator should not be distorted to fake delayed-state support. `MeasurementEnvelope` preserves source/receive time, clock domain, uncertainty and provenance; `DelayedMeasurementBackend` is a separate seam for a future fixed-lag or factor-graph path.
+This supports alternate backends without implying that the current USV state model is suitable for UUV, UAV, UGV, or other platforms.
 
-### Maritime guidance explicitly requires synchronization, modes, integrity/status and recording
+### 2.5 Software evidence must bind behavior-affecting configuration
 
-IMO MSC.1/Circ.1575 calls for PNT processing to document operating modes, spatial and temporal synchronization of inputs, dependencies between input and output performance, internal status/integrity monitoring and recordable output. IALA G1180 frames resilient PNT as a system-of-systems problem involving dissimilar sources and failure modes.
+Replay evidence is tied to a deterministic configuration fingerprint that includes:
 
-**AMEP implication:** source time, receive time, timestamp uncertainty, freshness, dependency configuration, mode, reason, source health, integrity state and replay evidence are architecture-level data—not optional debug information.
+- software-tree identity;
+- Python and key dependency versions;
+- estimator type and estimator configuration;
+- health policies;
+- constraint-coverage configuration;
+- source-registry declarations and fingerprint;
+- time-alignment policy and clock domains;
+- integrity policy;
+- cross-source consistency policy;
+- navigation policy;
+- runtime policy.
 
-### Defense portability favors MOSA-style replaceable modules
+The evidence log is hash chained for deterministic tamper evidence. It is not a digital signature, secure logger, trusted clock, or certification artifact.
 
-The U.S. DoD describes MOSA as a modular, loosely coupled, highly cohesive architecture using accepted and verifiable interfaces. SOSA applies related principles to interoperable sensor/C5ISR components, while FACE defines portable component interfaces for airborne computing environments.
-
-**AMEP implication:** portable interfaces and assurance behavior must be independent of one vehicle's state vector. The current AMEPFilter remains the maritime reference backend; other vehicle classes require their own dynamics and evidence.
-
-### Production software requires software-assurance evidence
-
-NIST SP 800-218 SSDF remains a useful secure-development baseline; NIST published an initial public draft of SSDF 1.2 in December 2025. IEEE 1588-2019 remains an active precision clock synchronization standard for networked measurement/control systems.
-
-**AMEP implication:** deterministic replay, configuration fingerprints, secure development, dependency/SBOM controls, clock provenance and target-hardware timing are production gates, not paperwork after algorithm development.
-
-## 3. Architecture after this tranche
+## 3. Current hardened architecture
 
 ```text
 PLATFORM-SPECIFIC SENSOR / BUS ADAPTERS
-GNSS | raw INS/IMU | radar | camera/LiDAR | DVL/STW | alt-PNT | time/RF health
+GNSS | IMU/INS | radar | camera/LiDAR | DVL/STW | alt-PNT | timing/RF health
                          |
                          v
                  MeasurementEnvelope
@@ -81,12 +94,12 @@ GNSS | raw INS/IMU | radar | camera/LiDAR | DVL/STW | alt-PNT | time/RF health
                          |
                          v
                     SourceRegistry
- role + primary failure domain + shared dependencies + safety credit
+ role + failure domain + shared dependencies + safety-credit contract
                |                              |
                v                              v
  CrossSourceConsistency                 EstimatorBackend
- dependency-disjoint absolute           backend owns state,
- evidence before fusion                 frames & measurement models
+ pre-fusion contradiction               backend-owned state,
+ evidence                               frames and observation models
                |                              |
                +---------------+--------------+
                                v
@@ -95,108 +108,152 @@ GNSS | raw INS/IMU | radar | camera/LiDAR | DVL/STW | alt-PNT | time/RF health
                       ConstraintCoverage
                                |
                         IntegrityEngine
-      dependency diversity + contradictions + health + rank
+ health + rank + dependency diversity + contradictions + hard faults
                                |
                       NavigationSupervisor
  NOMINAL / GPS_DENIED_RESILIENT / DEGRADED_DEAD_RECKONING / SAFE_HOLD
                                |
                                v
                           PNTSolution
-          explicit frame + covariance + health + integrity
+ frame + state schema + covariance labels + health + integrity + age
 
-Parallel future path:
-MeasurementEnvelope -> DelayedMeasurementBackend -> fixed-lag/FGO corrections
+Delayed/asynchronous extension:
+MeasurementEnvelope -> DelayedMeasurementBackend -> fixed-lag/FGO backend
 
-Verification path:
-ReplayEvent -> DeterministicReplay -> configuration-bound EvidenceLog
+Verification:
+recorded events -> DeterministicReplay -> configuration-bound EvidenceLog
 ```
 
-The assured reference runtime disables legacy direct measurement updates. Measurements must traverse normalized time/provenance/dependency/integrity checks. Compatibility mode remains available only through explicit direct construction of `AMEPRuntime`.
+## 4. Implemented hardening requirements
 
-## 4. Implemented hardening rules
+### R1 — normalized ingestion is the research reference path
 
-1. **Healthy is not independent.** Independence credit uses pairwise-disjoint declared dependencies, not source count.
-2. **Contradictory independent absolute fixes are checked before fusion.** The disputed candidate is not fused and integrity latches to `ALERT`; two-source disagreement is not falsely attributed to one source.
-3. **Rejected candidates cannot erase integrity evidence.** A later EKF-rejected measurement cannot clear a latched cross-source conflict.
-4. **GNSS-denied resilience is deliberately harder to earn.** Full local state coverage with one non-GNSS absolute source remains degraded.
-5. **Failure/dependency declarations are assumptions, not proof.** Real system analysis must include RF, clock, map, calibration, power, compute, network and preprocessing common causes.
-6. **Runtime does not own estimator state layout.** Semantic measurements and explicit frames cross the backend boundary; the backend owns `H`, state dimension and dynamics.
-7. **Protection level remains unavailable.** The covariance containment proxy is not promoted to a certified bound.
-8. **Replay is configuration-bound.** Replay evidence contains a SHA-256 fingerprint of the source dependency registry plus deterministic event ordering.
-9. **The assured reference path cannot bypass normalization.** Legacy update helpers are compatibility-only and disabled in `build_reference_runtime()`.
-10. **Interfaces are portable; vehicle dynamics are not automatically portable.** Each platform estimator must earn its own evidence.
+`build_research_reference_runtime()` disables legacy direct measurement updates and requires registered source descriptors. Measurements must traverse time alignment, source-contract checks, pre-fusion consistency, estimator update, health accounting, integrity evaluation, and mode supervision.
 
-## 5. Production gates, prioritized
+### R2 — safety credit is opt-in
 
-### P0 — close before any operational navigation claim
+`SourceDescriptor.safety_credit` defaults to `False`. A safety-credit source must require provenance and declare a finite timestamp-uncertainty limit. The bundled research reference profile grants no source safety credit because the repository does not contain a validated vehicle-specific dependency analysis or adapter timing contract.
 
-- Recorded real multisensor replay with independently referenced truth and predeclared outage/fault intervals.
-- Measured sensor timestamp provenance, synchronization uncertainty and latency on target hardware/network.
-- Lever-arm, boresight, datum and coordinate-frame calibration procedures with quantified uncertainty.
-- Real bus/transport adapters with corruption, disconnect/reconnect, stale/frozen data, restart and latency testing.
-- Target-hardware WCET, jitter, memory/CPU saturation, overload and watchdog response evidence.
-- HIL fault injection covering dropout, frozen data, clock skew, frame mistakes, gross faults, slow bias, shared map faults and correlated/common-cause faults.
-- Controlled benign-water trials with independent truth, safety observer, abort criteria and complete logs.
+### R3 — non-GNSS resilient mode requires integrity permission
+
+`NavigationSupervisor` cannot grant `GPS_DENIED_RESILIENT` from full state rank alone. The caller must provide an `IntegrityReport` that explicitly permits resilient navigation. The default integrity policy requires at least two ONLINE non-GNSS absolute sources with safety credit whose declared integrity-dependency sets are pairwise disjoint.
+
+### R4 — cross-source contradiction is evaluated before fusion
+
+Near-synchronous same-frame absolute-position observations from dependency-disjoint source chains are checked before estimator mutation. A contradiction prevents the disputed candidate from being fused and latches integrity to `ALERT`. Two-source disagreement does not auto-identify the faulty source.
+
+### R5 — estimator-local covariance is not a protection level
+
+`PNTSolution` exposes a configurable-probability horizontal containment proxy as a diagnostic quantity. It also explicitly reports:
+
+```text
+horizontal_protection_bound_m = None
+protection_bound_validated = False
+```
+
+No protection-level claim is made without a declared integrity-risk model and validation evidence.
+
+### R6 — covariance is schema-labeled
+
+Every estimator snapshot carries `state_schema_id` and ordered `covariance_labels`. A replacement backend cannot expose an unlabeled covariance matrix through the portable PNT contract.
+
+### R7 — replay order matches online arrival order
+
+Measurement replay is sorted by recorded receive time plus explicit sequence, not raw source timestamp. Contract rejection, estimator rejection, estimator acceptance, and actual fusion are counted separately.
+
+### R8 — evidence fingerprints behavior-affecting configuration
+
+The replay configuration hash includes estimator, timing, health, coverage, dependency, integrity, consistency, navigation, runtime, software-tree, and dependency-version information rather than only a source-registry hash.
+
+### R9 — communications/timing support rejects invalid time behavior
+
+Communications heartbeat handling rejects non-finite and non-monotonic timestamps, and future-dated heartbeats are not considered healthy. The host deadline observer rejects non-finite/non-monotonic observations and does not let invalid samples corrupt the last valid timing reference.
+
+### R10 — software verification runs on the dedicated self-hosted runner
+
+The AMEP GitHub Actions workflow targets the repository-specific Windows runner and validates a clean PR checkout. The workflow uses the already installed Python runtime on the self-hosted machine rather than attempting hosted-runner tool-cache installation.
+
+## 5. Remaining engineering and evidence gates
+
+### P0 — required before an operational navigation claim
+
+- recorded real multisensor replay with independently referenced truth and predeclared fault/outage intervals;
+- measured source timestamp provenance, synchronization uncertainty, and transport latency;
+- lever-arm, boresight, datum, frame, and calibration procedures with quantified uncertainty;
+- real bus/transport adapters with corruption, disconnect/reconnect, stale/frozen data, restart, and latency testing;
+- target-hardware WCET, jitter, CPU/memory saturation, overload, and watchdog-response evidence;
+- HIL fault injection for dropout, frozen data, clock skew, frame mistakes, gross faults, slow bias, shared-map faults, and common-cause faults;
+- controlled water trials with independent truth, safety observers, abort criteria, and complete logs.
 
 ### P1 — calibrated inertial mechanization
 
-Build a separate strapdown INS/ESKF backend rather than feeding raw accelerometer specific force directly into the seven-state AMEPFilter. A production-facing state will normally need position, velocity, attitude, gyro bias and accelerometer bias at minimum, with explicit Earth/gravity/frame conventions and sensor calibration. Invariant-filter formulations are candidates to compare, not automatic upgrades.
+Implement and evaluate a separate strapdown INS/ESKF backend rather than feeding raw accelerometer specific force into the seven-state maritime filter. A production-facing inertial state will normally require position, velocity, attitude, gyro bias, and accelerometer bias at minimum, with explicit Earth/gravity/frame conventions and sensor calibration.
 
-The new backend boundary exists specifically so this can be introduced without cloning the health/integrity/authority/replay stack.
+Invariant-filter formulations are comparison candidates, not automatic upgrades.
 
-### P2 — FDE and defensible integrity bounds
+### P2 — architecture-derived FDE and integrity bounds
 
-- Architecture-derived source-dependence graph.
-- Multi-hypothesis/solution-separation or equivalent FDE appropriate to the real measurement set.
-- False-alert, missed-detection and time-to-alert metrics.
-- Explicit common-cause hypotheses.
-- Non-Gaussian/heavy-tail sensitivity.
-- Protection/integrity bound only after a declared risk model and empirical calibration with independent truth.
+Required work includes:
+
+- a reviewed source-dependency/common-cause graph;
+- fault hypotheses derived from the actual platform architecture;
+- solution separation, multi-hypothesis testing, or an equivalent FDE mechanism appropriate to the measurement set;
+- false-alert, missed-detection, and time-to-alert metrics;
+- non-Gaussian/heavy-tail sensitivity;
+- explicit common-cause hypotheses;
+- a protection/integrity bound only after a declared risk allocation and empirical validation against independent truth.
 
 ### P3 — delayed/asynchronous estimation
 
-Add a fixed-lag or factor-graph backend for delayed radar/vision/bathymetry constraints, calibration and replay. Keep the real-time estimator independently runnable so optimizer latency or failure cannot silently remove low-latency navigation.
+Add a fixed-lag or factor-graph backend for delayed radar, vision, bathymetry, calibration, and replay workloads. Keep the deterministic low-latency estimator independently runnable so optimizer latency or failure cannot silently remove real-time navigation.
 
 ### P4 — platform profiles
 
-Define platform profiles binding:
+Each platform profile should bind:
 
-- estimator backend and prediction-input type;
-- accepted frames/datum;
+- estimator backend and prediction-input contract;
+- state schema and covariance labels;
+- accepted frame/datum definitions;
 - source registry and dependency model;
+- source safety-credit decisions;
 - clock synchronization profile;
 - sensor/bus adapters;
 - constraint/observability model;
-- integrity and authority policy;
-- performance/integrity requirements;
-- safe-state contract.
+- integrity/navigation policy;
+- performance and integrity requirements;
+- safe-state behavior.
 
-USV, UUV, UAV and UGV integrations should share envelope, timing, dependency, integrity, replay and evidence contracts while using different dynamics/state models when required.
+USV, UUV, UAV, and UGV integrations may share envelope, timing, dependency, replay, evidence, and authority contracts while using different estimator dynamics and state models.
 
 ### P5 — software and supply-chain assurance
 
-- Reproducible dependency locking and SBOM generation.
-- Static type/lint/security scanning and dependency vulnerability scanning.
-- Signed/tagged release process with immutable evidence manifests.
-- NIST SSDF mapping and vulnerability-response procedure.
-- Independent review/replay of material positive and negative findings.
+The CI baseline should continue to enforce:
 
-## 6. What would impress a serious integrator
+- compilation and unit/integration tests;
+- coverage threshold;
+- linting;
+- static type checking;
+- static security scanning;
+- runtime dependency vulnerability auditing;
+- CycloneDX SBOM generation;
+- immutable/tagged release evidence when formal releases are produced.
 
-Not a larger algorithm list. The credible demonstration is an end-to-end evidence package:
+Future work should add reproducible dependency locking, signed releases, NIST SSDF traceability, vulnerability-response procedures, and independent replay of material positive and negative findings.
 
-1. Frozen vehicle profile, frames, calibration and source-dependency graph.
-2. Real recorded data with independent truth and declared fault intervals.
-3. Deterministic replay producing matching configuration/event hashes and outputs on another machine.
-4. Equal-sensor EKF/ESKF/FGO comparisons with no privileged preprocessing.
-5. Common-cause challenges where AMEP refuses to grant false independence credit.
-6. Measured timing/resource behavior on target compute.
-7. HIL and water/field trials with traceable requirements, failure logs and abort criteria.
-8. A PNT output that explicitly states what it knows, what it does not know, and why autonomy is or is not permitted.
+## 6. External review evidence package
 
-That is the transition from an interesting estimator to an acquisition-relevant navigation subsystem.
+An external engineering review should be based on reproducible artifacts rather than broad capability claims. The minimum useful package is:
 
-## 7. Research/standards references
+1. frozen source/vehicle profile, coordinate frames, calibration identity, and dependency graph;
+2. executable code and exact software/configuration fingerprint;
+3. deterministic replay with matching event/configuration hashes on a second environment;
+4. same-sensor estimator comparisons without privileged preprocessing;
+5. common-cause challenges demonstrating that shared dependencies do not receive false independence credit;
+6. target-compute timing/resource measurements;
+7. HIL and water/field evidence with traceable requirements, failure logs, and abort criteria;
+8. PNT output that states supported quantities, unavailable quantities, integrity status, and the reason a navigation mode is or is not authorized.
+
+## 7. Research and standards references
 
 - Stanford NAV Lab, Robust Navigation and Sensor Fusion: https://navlab.stanford.edu/research/robust-sensor-fusion
 - Stanford GPS Lab, RAIM: https://gps.stanford.edu/research/early-gpspnt-research/receiver-autonomous-integrity-monitoring-raim
