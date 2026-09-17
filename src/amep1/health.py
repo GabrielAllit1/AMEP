@@ -63,13 +63,25 @@ class SensorHealthManager:
         source: str,
         timestamp_s: float,
         result: MeasurementResult,
+        *,
+        allow_out_of_order: bool = False,
     ) -> SensorHealth:
+        """Account one estimator decision for a registered source.
+
+        Normal online ingestion fails closed on a timestamp regression. A delayed
+        estimator may explicitly set ``allow_out_of_order=True`` after the sample
+        has passed the dedicated delayed-data contract. In that case the
+        historical measurement contributes to rejection/recovery statistics but
+        never moves ``last_seen_s`` backwards or makes stale data appear fresh.
+        """
         record = self._record(source)
         if record.last_seen_s is not None and timestamp_s < record.last_seen_s:
-            record.state = SensorHealth.ISOLATED
-            record.consecutive_probe_accepts = 0
-            return record.state
-        record.last_seen_s = timestamp_s
+            if not allow_out_of_order:
+                record.state = SensorHealth.ISOLATED
+                record.consecutive_probe_accepts = 0
+                return record.state
+        else:
+            record.last_seen_s = timestamp_s
 
         if record.manual_isolated:
             record.state = SensorHealth.ISOLATED
