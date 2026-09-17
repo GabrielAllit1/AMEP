@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from math import isfinite
-from typing import Mapping
 
 from .types import MeasurementResult
 
