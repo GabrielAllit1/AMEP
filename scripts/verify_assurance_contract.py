@@ -12,6 +12,9 @@ MATRIX = ROOT / "assurance" / "requirements-to-tests.json"
 WORKFLOWS = ROOT / ".github" / "workflows"
 FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
 USES = re.compile(r"^\s*uses:\s*([^\s#]+)", re.MULTILINE)
+TOP_LEVEL_PR_TRIGGER = re.compile(r"(?m)^  pull_request(?:_target)?:")
+TRUSTED_PUSH_HEADER = "on:\n  push:\n  workflow_dispatch:\n"
+SELF_HOSTED_RUNNER = "runs-on: [self-hosted, windows, x64, amep]"
 
 
 def _test_functions(path: Path) -> set[str]:
@@ -107,6 +110,32 @@ def verify_environment_capture() -> list[str]:
     return failures
 
 
+def verify_self_hosted_runner_boundary() -> list[str]:
+    failures: list[str] = []
+    workflow_paths = sorted(WORKFLOWS.glob("*.yml")) + sorted(
+        WORKFLOWS.glob("*.yaml")
+    )
+    for path in workflow_paths:
+        text = path.read_text(encoding="utf-8")
+        if "self-hosted" in text and TOP_LEVEL_PR_TRIGGER.search(text):
+            failures.append(
+                f"{path.relative_to(ROOT)}: self-hosted workflow must not run on "
+                "pull_request or pull_request_target"
+            )
+
+    ci = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+    if TRUSTED_PUSH_HEADER not in ci:
+        failures.append(
+            "ci.yml must validate trusted repository branches on push and must not "
+            "scope self-hosted CI to main only"
+        )
+    if SELF_HOSTED_RUNNER not in ci:
+        failures.append(
+            "ci.yml no longer targets the designated AMEP Windows self-hosted runner"
+        )
+    return failures
+
+
 def main() -> None:
     failures: list[str] = []
     requirement_count, requirement_failures = verify_requirements()
@@ -114,6 +143,7 @@ def main() -> None:
     failures.extend(requirement_failures)
     failures.extend(workflow_failures)
     failures.extend(verify_environment_capture())
+    failures.extend(verify_self_hosted_runner_boundary())
 
     result = {
         "status": "PASS" if not failures else "FAIL",

@@ -2,15 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
+# Security boundary: the canonical self-hosted workflow intentionally has no
+# pull_request or pull_request_target trigger. Trusted repository branches are
+# validated on push. Public fork PRs must be reviewed and brought onto a
+# trusted branch before this runner executes their code.
 permissions:
   contents: read
 
 concurrency:
-  group: amep-ci-${{ github.event.pull_request.number || github.ref }}
+  group: amep-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
