@@ -118,7 +118,7 @@ The Version 1.0 correlated-common-bias experiment is a design constraint: mutual
 
 ### What AMEP currently provides
 
-The repository contains host-SIL timing observation and rejects non-finite/non-monotonic timing. GitHub CI on the dedicated AMEP Windows runner validates software behavior, not target-hardware real-time behavior.
+The repository contains host-SIL timing observation and rejects non-finite/non-monotonic timing. CI is orchestrated by GitHub Actions but executes on the dedicated AMEP self-hosted Windows runner, not on GitHub-hosted runners. This validates software behavior on that controlled host, not target-hardware real-time behavior.
 
 ### Evidence required before deployment claims
 
