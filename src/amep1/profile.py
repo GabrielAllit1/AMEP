@@ -57,9 +57,9 @@ def build_research_reference_source_registry() -> SourceRegistry:
 
     Failure-domain labels document intended physical diversity only. The research
     profile has no verified vehicle dependency analysis, adapter provenance
-    contract, or timestamp-uncertainty budget, so no source receives integrity
-    safety credit. A platform profile must explicitly opt sources into safety
-    credit after those requirements are defined and validated.
+    contract, timestamp-uncertainty budget, or assurance reference, so no source
+    receives integrity safety credit. A platform profile must explicitly opt
+    sources into safety credit after those requirements are defined and validated.
     """
     registry = SourceRegistry()
     descriptors = (
@@ -117,24 +117,24 @@ def build_research_reference_source_registry() -> SourceRegistry:
 def build_research_reference_runtime():
     """Construct the conservative research reference runtime.
 
-    Every measurement must traverse the normalized ingestion path and every source
-    must have a registered contract. The included source declarations intentionally
-    grant no non-GNSS resilience safety credit.
+    Every measurement must traverse the normalized ingestion path, every source
+    must have a registered contract, and the behavior-affecting configuration is
+    validated and sealed before the runtime is returned. The included source
+    declarations intentionally grant no non-GNSS resilience safety credit.
     """
     from .estimator import AMEPFilter
     from .runtime import AMEPRuntime
 
     health, coverage = build_reference_health_and_constraints()
-    return AMEPRuntime(
+    runtime = AMEPRuntime(
         AMEPFilter(),
         health,
         coverage,
         source_registry=build_research_reference_source_registry(),
-        runtime_policy=RuntimePolicy(
-            allow_legacy_direct_updates=False,
-            require_registered_sources=True,
-        ),
+        runtime_policy=RuntimePolicy(),
     )
+    runtime.seal_configuration()
+    return runtime
 
 
 def build_reference_source_registry() -> SourceRegistry:
