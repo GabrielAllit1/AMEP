@@ -97,7 +97,9 @@ This is deterministic tamper evidence. It is not a digital signature, secure clo
 
 ## Clean-checkout CI
 
-The repository's CI is intended to verify a clean checkout on the dedicated AMEP self-hosted Windows runner. The quality pipeline can include:
+GitHub Actions is used as the orchestration/control plane only. AMEP CI jobs execute on the dedicated repository-specific self-hosted Windows runner with the `self-hosted`, `windows`, `x64`, and `amep` labels; no GitHub-hosted runner compute is used.
+
+The quality pipeline can include:
 
 ```text
 compile
@@ -110,7 +112,7 @@ dependency vulnerability audit
 CycloneDX SBOM generation
 ```
 
-The self-hosted runner proves reproducible repository execution on that host. It does not prove embedded target suitability.
+The self-hosted runner demonstrates reproducible repository execution on that controlled host. It does not prove embedded target suitability, vessel-compute determinism, or field behavior.
 
 ## What recorded-data validation must look like
 
