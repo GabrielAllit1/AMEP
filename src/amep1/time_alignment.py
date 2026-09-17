@@ -109,7 +109,11 @@ class IngestResult:
 class TimeAligner:
     """Normalize sensor timestamps into the navigation clock domain.
 
-    The real-time estimator rejects delayed/out-of-order samples it cannot rewind.
+    Normal real-time ingestion rejects out-of-order measurements by default.
+    ``allow_out_of_order=True`` is an explicit escape hatch for a backend that
+    can rewind/replay or smooth delayed data. It does not relax latency, age,
+    validity, clock-domain, or future-time checks.
+
     ``align(..., commit=False)`` supports two-phase validation so downstream
     contract failures cannot advance a source ordering watermark.
     """
@@ -160,6 +164,7 @@ class TimeAligner:
         *,
         now_s: float | None = None,
         commit: bool = True,
+        allow_out_of_order: bool = False,
     ) -> TimeAlignmentResult:
         try:
             envelope.validate()
@@ -192,7 +197,12 @@ class TimeAligner:
             return TimeAlignmentResult(False, "measurement_too_old")
 
         last = self._last_timestamp_by_source.get(envelope.source)
-        if self.policy.reject_out_of_order and last is not None and timestamp_s < last:
+        if (
+            self.policy.reject_out_of_order
+            and not allow_out_of_order
+            and last is not None
+            and timestamp_s < last
+        ):
             return TimeAlignmentResult(False, "out_of_order_measurement")
 
         uncertainty_s = float(envelope.timestamp_uncertainty_s + domain.uncertainty_s)

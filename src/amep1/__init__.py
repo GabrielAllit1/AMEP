@@ -9,6 +9,7 @@ from .consistency import (
     SourceConflict,
 )
 from .constraints import ConstraintCoverage, ConstraintSpec
+from .delayed_runtime import ingest_delayed_measurement
 from .enums import AuthoritySource, NavMode, SensorHealth
 from .estimator import AMEPFilter, TimebaseError
 from .evidence import (
@@ -17,6 +18,12 @@ from .evidence import (
     EvidenceVerification,
     canonical_fingerprint,
     software_identity,
+)
+from .fixed_lag import (
+    DelayedMeasurement,
+    FixedLagBackendAdapter,
+    FixedLagOptimizationResult,
+    FixedLagWindowError,
 )
 from .health import SensorHealthManager
 from .integrity import IntegrityEngine, IntegrityPolicy, IntegrityReport, IntegrityStatus
@@ -37,6 +44,7 @@ from .replay import (
 from .runtime import AMEPRuntime
 from .solution import PNTSolution
 from .source_registry import SourceClass, SourceDescriptor, SourceRegistry
+from .strapdown import RawIMUInput, StrapdownINSBackend, StrapdownINSConfig
 from .time_alignment import (
     AlignedMeasurement,
     ClockDomain,
@@ -70,6 +78,7 @@ __all__ = [
     "CoverageResult",
     "CrossSourceConsistencyMonitor",
     "DeadlineWatchdog",
+    "DelayedMeasurement",
     "DelayedMeasurementBackend",
     "DeterministicReplay",
     "EstimatorBackend",
@@ -78,6 +87,9 @@ __all__ = [
     "EvidenceLog",
     "EvidenceRecord",
     "EvidenceVerification",
+    "FixedLagBackendAdapter",
+    "FixedLagOptimizationResult",
+    "FixedLagWindowError",
     "HorizontalIMUInput",
     "IngestResult",
     "IntegrityEngine",
@@ -93,6 +105,7 @@ __all__ = [
     "NavigationSupervisor",
     "PNTSolution",
     "ProcessNoiseConfig",
+    "RawIMUInput",
     "ReplayIMUEvent",
     "ReplayMeasurementEvent",
     "ReplayPredictionEvent",
@@ -105,6 +118,8 @@ __all__ = [
     "SourceDescriptor",
     "SourcePolicy",
     "SourceRegistry",
+    "StrapdownINSBackend",
+    "StrapdownINSConfig",
     "TimeAligner",
     "TimeAlignmentPolicy",
     "TimeAlignmentResult",
@@ -116,5 +131,6 @@ __all__ = [
     "build_research_reference_runtime",
     "build_research_reference_source_registry",
     "canonical_fingerprint",
+    "ingest_delayed_measurement",
     "software_identity",
 ]
