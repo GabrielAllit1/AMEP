@@ -9,6 +9,7 @@ from .consistency import (
     SourceConflict,
 )
 from .constraints import ConstraintCoverage, ConstraintSpec
+from .delayed_runtime import ingest_delayed_measurement
 from .enums import AuthoritySource, NavMode, SensorHealth
 from .estimator import AMEPFilter, TimebaseError
 from .evidence import (
@@ -130,5 +131,6 @@ __all__ = [
     "build_research_reference_runtime",
     "build_research_reference_source_registry",
     "canonical_fingerprint",
+    "ingest_delayed_measurement",
     "software_identity",
 ]
