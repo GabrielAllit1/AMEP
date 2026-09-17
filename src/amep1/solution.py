@@ -11,12 +11,10 @@ from .integrity import IntegrityReport, IntegrityStatus
 class PNTSolution:
     """Evidence-bounded navigation output contract.
 
-    ``frame`` is explicit and estimator-specific optional quantities remain
-    nullable. The current maritime estimator supplies water-relative velocity and
-    surface current; another platform backend need not invent those states.
-    Attitude, validated navigation time, and a validated protection bound are
-    still represented explicitly as unavailable when the backend cannot support
-    them with evidence.
+    Covariance is self-describing through ``state_schema_id`` and
+    ``covariance_labels``. The containment proxy is reported together with its
+    configured probability rather than encoding a probability into the field
+    name. Backend-specific maritime quantities remain nullable.
     """
 
     timestamp_s: float | None
@@ -32,7 +30,10 @@ class PNTSolution:
     current_n_mps: float | None
     heading_rad: float
     covariance: tuple[tuple[float, ...], ...]
-    containment_proxy_95_m: float
+    state_schema_id: str
+    covariance_labels: tuple[str, ...]
+    containment_probability: float
+    horizontal_containment_proxy_m: float
     horizontal_protection_bound_m: float | None
     protection_bound_validated: bool
     integrity_status: IntegrityStatus
