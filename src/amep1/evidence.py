@@ -9,7 +9,6 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-
 JSONScalar = str | int | float | bool | None
 JSONValue = JSONScalar | list["JSONValue"] | dict[str, "JSONValue"]
 
