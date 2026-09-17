@@ -1,5 +1,6 @@
 name: PR validation
 
+# Public pull requests execute only on GitHub-hosted Windows runners.
 on:
   pull_request:
   workflow_dispatch:
