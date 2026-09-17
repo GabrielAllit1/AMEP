@@ -140,15 +140,19 @@ def main() -> None:
     failures: list[str] = []
     requirement_count, requirement_failures = verify_requirements()
     uses_count, workflow_failures = verify_workflow_pins()
+    runner_boundary_failures = verify_self_hosted_runner_boundary()
     failures.extend(requirement_failures)
     failures.extend(workflow_failures)
     failures.extend(verify_environment_capture())
-    failures.extend(verify_self_hosted_runner_boundary())
+    failures.extend(runner_boundary_failures)
 
     result = {
         "status": "PASS" if not failures else "FAIL",
         "requirements_checked": requirement_count,
         "external_actions_checked": uses_count,
+        "self_hosted_runner_boundary": (
+            "PASS" if not runner_boundary_failures else "FAIL"
+        ),
         "matrix": str(MATRIX.relative_to(ROOT)),
         "failures": failures,
         "scope": (
