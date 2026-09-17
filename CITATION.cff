@@ -1,17 +1,12 @@
 cff-version: 1.2.0
-message: "If you use AMEP-1 in research, please cite the Version 1.0 technical report."
+message: "If you use this software, cite this repository and software version. The published AMEP-1 Version 1.0 research report is separately identified by DOI 10.5281/zenodo.22561851."
 title: "Adaptive Maritime Estimation and PNT (AMEP-1): A Falsifiable Resilient Multisensor Navigation and Autonomy-Authority Architecture for GNSS-Degraded USV Operation"
 type: software
 authors:
   - family-names: Allit
     given-names: Gabriel V.
     orcid: "https://orcid.org/0009-0008-2365-226X"
-version: "0.2.0"
-date-released: 2026-09-10
-identifiers:
-  - type: doi
-    value: "10.5281/zenodo.22561851"
-    description: "AMEP-1 Version 1.0 research report"
+version: "0.3.0.dev0"
 repository-code: "https://github.com/GabrielAllit1/AMEP"
 keywords:
   - resilient PNT
