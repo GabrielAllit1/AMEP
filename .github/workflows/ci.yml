@@ -65,6 +65,7 @@ jobs:
 
       - name: Upload assurance artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: amep-assurance-${{ github.run_id }}
