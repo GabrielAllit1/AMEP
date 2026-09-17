@@ -25,10 +25,15 @@ class SourceClass(str, Enum):
 class SourceDescriptor:
     """Declared integration and common-cause metadata for one source.
 
-    ``failure_domain`` names the source's primary measurement-generation chain.
-    ``dependencies`` can declare additional shared integrity dependencies such as
-    a common clock, map, preprocessing service, receiver, or other common cause.
-    Different labels are engineering declarations, not proof of independence.
+    ``failure_domain`` identifies the source's primary measurement-generation
+    chain. ``dependencies`` declares additional shared integrity dependencies,
+    such as a clock, map, preprocessing service, receiver, compute service, or
+    power domain. Declarations are engineering assumptions, not proof of
+    statistical independence.
+
+    Safety credit is conservative by default. A source may receive safety credit
+    only when provenance is required and a finite timestamp-uncertainty budget is
+    declared by the integration profile.
     """
 
     name: str
@@ -36,7 +41,7 @@ class SourceDescriptor:
     failure_domain: str
     absolute_position: bool = False
     gnss: bool = False
-    safety_credit: bool = True
+    safety_credit: bool = False
     clock_domain: str = "navigation"
     provenance_required: bool = False
     max_timestamp_uncertainty_s: float | None = None
@@ -56,6 +61,13 @@ class SourceDescriptor:
             raise ValueError("max_timestamp_uncertainty_s must be >= 0")
         if self.gnss and not self.absolute_position:
             raise ValueError("GNSS source must declare absolute_position=True")
+        if self.safety_credit:
+            if not self.provenance_required:
+                raise ValueError("safety-credit source must require provenance")
+            if self.max_timestamp_uncertainty_s is None:
+                raise ValueError(
+                    "safety-credit source must declare max_timestamp_uncertainty_s"
+                )
 
     @property
     def integrity_dependencies(self) -> frozenset[str]:
@@ -63,7 +75,7 @@ class SourceDescriptor:
 
 
 class SourceRegistry:
-    """MOSA-style registry separating source identity/dependencies from estimation."""
+    """Registry separating source identity and dependencies from estimation."""
 
     def __init__(self) -> None:
         self._sources: dict[str, SourceDescriptor] = {}
@@ -85,9 +97,8 @@ class SourceRegistry:
     def descriptors(self) -> tuple[SourceDescriptor, ...]:
         return tuple(self._sources[name] for name in sorted(self._sources))
 
-    def fingerprint(self) -> str:
-        """Stable SHA-256 fingerprint of the declared source dependency model."""
-        payload = [
+    def configuration(self) -> tuple[dict[str, object], ...]:
+        return tuple(
             {
                 "name": descriptor.name,
                 "source_class": descriptor.source_class.value,
@@ -98,12 +109,20 @@ class SourceRegistry:
                 "clock_domain": descriptor.clock_domain,
                 "provenance_required": descriptor.provenance_required,
                 "max_timestamp_uncertainty_s": descriptor.max_timestamp_uncertainty_s,
-                "dependencies": sorted(descriptor.dependencies),
+                "dependencies": tuple(sorted(descriptor.dependencies)),
                 "attributes": dict(sorted(descriptor.attributes.items())),
             }
             for descriptor in self.descriptors()
-        ]
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        )
+
+    def fingerprint(self) -> str:
+        """Stable SHA-256 fingerprint of the declared source dependency model."""
+        canonical = json.dumps(
+            self.configuration(),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _eligible(
@@ -154,8 +173,10 @@ class SourceRegistry:
     ) -> int:
         """Return the largest pairwise dependency-disjoint source subset.
 
-        Source sets are small in PNT integration, so an exhaustive subset search
-        is deterministic, auditable, and preferable here to an opaque heuristic.
+        Navigation source sets are expected to remain small, so exhaustive subset
+        search is deterministic and auditable. If source counts become large, the
+        integration should replace this implementation with an explicitly reviewed
+        graph optimization rather than silently changing the integrity semantics.
         """
         descriptors = self._eligible(
             sources,
@@ -168,11 +189,11 @@ class SourceRegistry:
                 occupied: set[str] = set()
                 independent = True
                 for descriptor in subset:
-                    deps = set(descriptor.integrity_dependencies)
-                    if occupied.intersection(deps):
+                    dependencies = set(descriptor.integrity_dependencies)
+                    if occupied.intersection(dependencies):
                         independent = False
                         break
-                    occupied.update(deps)
+                    occupied.update(dependencies)
                 if independent:
                     return size
         return 0
