@@ -157,7 +157,7 @@ Run the exact integrated software on the declared target compute. Measure:
 - startup and reacquisition time;
 - behavior under representative concurrent workloads.
 
-GitHub Actions on a workstation is not target-compute qualification.
+Self-hosted CI execution on an engineering workstation is not target-compute qualification, even when the CI host is fully controlled by SALT19.
 
 ## Stage 7 — recorded-data campaign
 
