@@ -7,6 +7,7 @@ from amep1 import (
     ConstraintSpec,
     NavigationSupervisor,
     NavMode,
+    RuntimePolicy,
     SensorHealth,
     SensorHealthManager,
     SourcePolicy,
@@ -113,7 +114,12 @@ def test_runtime_isolated_source_is_probe_only_until_recovered():
         "gnss",
         ConstraintSpec((0, 1), absolute_position=True, gnss=True),
     )
-    runtime = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
+    runtime = AMEPRuntime(
+        AMEPFilter(P=np.eye(7)),
+        health,
+        coverage,
+        runtime_policy=RuntimePolicy.compatibility(),
+    )
     runtime.update_position(
         timestamp_s=0.0,
         source="gnss",
