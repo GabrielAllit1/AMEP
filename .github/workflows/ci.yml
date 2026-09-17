@@ -13,11 +13,11 @@ jobs:
   test:
     name: Windows self-hosted
     runs-on: [self-hosted, windows, x64, amep]
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Verify Python runtime
         shell: pwsh
@@ -30,10 +30,41 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[test]'
+          python -m pip install -e '.[test,qa]'
 
       - name: Compile
         run: python -m compileall -q src tests examples
 
-      - name: Test
-        run: python -m pytest
+      - name: Ruff
+        run: python -m ruff check src tests examples
+
+      - name: Type check
+        run: python -m mypy src/amep1
+
+      - name: Static security scan
+        run: python -m bandit -q -r src/amep1
+
+      - name: Runtime dependency audit
+        shell: pwsh
+        run: |
+          python -c "import importlib.metadata as m; print('numpy==' + m.version('numpy')); print('scipy==' + m.version('scipy'))" | Out-File -Encoding ascii .ci-runtime-requirements.txt
+          python -m pip_audit -r .ci-runtime-requirements.txt --strict
+
+      - name: Generate CycloneDX SBOM
+        shell: pwsh
+        run: |
+          cyclonedx-py requirements .ci-runtime-requirements.txt --output-format JSON --output-file sbom.cdx.json
+          if (-not (Test-Path sbom.cdx.json)) { throw 'SBOM generation failed' }
+
+      - name: Test with coverage
+        run: python -m pytest --cov=amep1 --cov-report=term-missing --cov-report=xml --cov-fail-under=75
+
+      - name: Upload assurance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amep-assurance-${{ github.run_id }}
+          path: |
+            coverage.xml
+            sbom.cdx.json
+          if-no-files-found: warn
