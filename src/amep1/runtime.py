@@ -386,6 +386,7 @@ class AMEPRuntime:
             tuple(float(value) for value in row)
             for row in np.asarray(snapshot.covariance, dtype=float)
         )
+        source_age_s: dict[str, float | None]
         if status.timestamp_s is None:
             source_age_s = {name: None for name in self.health.states()}
         else:
