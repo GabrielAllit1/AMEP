@@ -46,9 +46,10 @@ class AMEPFilter:
         self.P = nearest_psd(self.P, self.config.covariance_eigen_floor)
         self.x[6] = wrap_angle(self.x[6])
 
-    def predict(self, imu: HorizontalIMUInput) -> float:
-        if not isinstance(imu, HorizontalIMUInput):
+    def predict(self, prediction_input: object) -> float:
+        if not isinstance(prediction_input, HorizontalIMUInput):
             raise TypeError("AMEPFilter expects HorizontalIMUInput prediction data")
+        imu = prediction_input
         imu.validate()
         require_finite(
             "imu",
