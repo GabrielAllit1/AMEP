@@ -149,7 +149,7 @@ python -m bandit -q -r src/amep1
 python -m pytest --cov=amep1 --cov-report=term-missing --cov-fail-under=75
 ```
 
-CI runs on the repository-specific self-hosted Windows runner and also audits direct runtime dependencies and generates a CycloneDX SBOM artifact. A passing CI run is software evidence only; it is not field or safety evidence.
+CI is orchestrated through GitHub Actions, but all job execution occurs on the repository-specific AMEP self-hosted Windows runner; no GitHub-hosted runner compute is used. The pipeline also audits direct runtime dependencies and generates a CycloneDX SBOM. A passing CI run is software evidence only; it is not field or safety evidence.
 
 ## Production-hardening gates
 
