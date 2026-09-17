@@ -6,6 +6,7 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from math import isfinite
 
 
 class SourceClass(str, Enum):
@@ -32,8 +33,9 @@ class SourceDescriptor:
     statistical independence.
 
     Safety credit is conservative by default. A source may receive safety credit
-    only when provenance is required and a finite timestamp-uncertainty budget is
-    declared by the integration profile.
+    only when provenance is required, a finite timestamp-uncertainty budget is
+    declared, and a non-empty assurance reference identifies the review/evidence
+    basis for granting that credit.
     """
 
     name: str
@@ -45,6 +47,7 @@ class SourceDescriptor:
     clock_domain: str = "navigation"
     provenance_required: bool = False
     max_timestamp_uncertainty_s: float | None = None
+    assurance_reference: str | None = None
     dependencies: tuple[str, ...] = ()
     attributes: Mapping[str, str] = field(default_factory=dict)
 
@@ -57,8 +60,19 @@ class SourceDescriptor:
             raise ValueError("clock_domain must be non-empty")
         if any(not dependency for dependency in self.dependencies):
             raise ValueError("dependency names must be non-empty")
-        if self.max_timestamp_uncertainty_s is not None and self.max_timestamp_uncertainty_s < 0:
-            raise ValueError("max_timestamp_uncertainty_s must be >= 0")
+        if len(set(self.dependencies)) != len(self.dependencies):
+            raise ValueError("dependency names must not contain duplicates")
+        for key, value in self.attributes.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError("attribute keys must be non-empty strings")
+            if not isinstance(value, str):
+                raise ValueError("attribute values must be strings")
+        if self.max_timestamp_uncertainty_s is not None:
+            uncertainty = float(self.max_timestamp_uncertainty_s)
+            if not isfinite(uncertainty) or uncertainty < 0:
+                raise ValueError(
+                    "max_timestamp_uncertainty_s must be finite and >= 0"
+                )
         if self.gnss and not self.absolute_position:
             raise ValueError("GNSS source must declare absolute_position=True")
         if self.safety_credit:
@@ -67,6 +81,10 @@ class SourceDescriptor:
             if self.max_timestamp_uncertainty_s is None:
                 raise ValueError(
                     "safety-credit source must declare max_timestamp_uncertainty_s"
+                )
+            if self.assurance_reference is None or not self.assurance_reference.strip():
+                raise ValueError(
+                    "safety-credit source must declare assurance_reference"
                 )
 
     @property
@@ -109,6 +127,7 @@ class SourceRegistry:
                 "clock_domain": descriptor.clock_domain,
                 "provenance_required": descriptor.provenance_required,
                 "max_timestamp_uncertainty_s": descriptor.max_timestamp_uncertainty_s,
+                "assurance_reference": descriptor.assurance_reference,
                 "dependencies": tuple(sorted(descriptor.dependencies)),
                 "attributes": dict(sorted(descriptor.attributes.items())),
             }

@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "scope": "AMEP-1 research software / SIL assurance traceability. This matrix is not certification, type approval, or operational maritime evidence.",
+  "requirements": [
+    {
+      "id": "AMEP-CFG-001",
+      "statement": "The default runtime policy shall fail closed until behavior-affecting configuration has been validated and sealed.",
+      "claim_boundary": "Software configuration-control behavior only.",
+      "tests": [
+        "tests/test_production_hardening.py::test_default_runtime_policy_requires_configuration_seal",
+        "tests/test_production_hardening.py::test_configuration_seal_rejects_cross_component_mismatch"
+      ]
+    },
+    {
+      "id": "AMEP-CFG-002",
+      "statement": "A sealed runtime shall detect post-seal configuration drift and block data processing.",
+      "claim_boundary": "In-process configuration fingerprinting; not cryptographic configuration attestation.",
+      "tests": [
+        "tests/test_production_hardening.py::test_sealed_configuration_drift_blocks_runtime",
+        "tests/test_production_hardening.py::test_runtime_configuration_fingerprint_changes_with_estimator_configuration"
+      ]
+    },
+    {
+      "id": "AMEP-NUM-001",
+      "statement": "Safety-relevant estimator, source, timing, consistency, and watchdog configuration shall reject non-finite numeric values.",
+      "claim_boundary": "Input-contract validation only; it does not validate vessel-specific tuning.",
+      "tests": [
+        "tests/test_production_hardening.py::test_safety_relevant_configs_reject_non_finite_values"
+      ]
+    },
+    {
+      "id": "AMEP-COV-001",
+      "statement": "Normalized measurement covariance shall be finite, symmetric, correctly dimensioned, and positive definite before estimator fusion.",
+      "claim_boundary": "Software covariance contract only; it does not establish real sensor covariance calibration.",
+      "tests": [
+        "tests/test_production_hardening.py::test_measurement_envelope_rejects_non_spd_covariance",
+        "tests/test_pnt_backbone.py::test_full_covariance_measurement_contract_is_used_by_runtime"
+      ]
+    },
+    {
+      "id": "AMEP-AUTH-001",
+      "statement": "DEGRADED absolute sources may contribute to the local information-rank heuristic but shall not receive healthy-source navigation-authority credit.",
+      "claim_boundary": "Reference SIL authority policy; not certified maritime safety logic.",
+      "tests": [
+        "tests/test_production_hardening.py::test_degraded_gnss_does_not_receive_nominal_authority_credit",
+        "tests/test_supervision.py::test_gnss_full_rank_is_nominal_but_non_gnss_requires_integrity_evidence"
+      ]
+    },
+    {
+      "id": "AMEP-INT-001",
+      "statement": "A dependency-disjoint cross-source absolute-position contradiction shall be rejected before fusion and latched until the configured recovery evidence threshold is satisfied.",
+      "claim_boundary": "Synthetic consistency-monitor behavior; it does not identify the faulty source or prove spoofing detection.",
+      "tests": [
+        "tests/test_production_hardening.py::test_independent_absolute_conflict_is_blocked_before_fusion_and_alerts",
+        "tests/test_production_hardening.py::test_cross_source_conflict_latches_until_recovery_threshold"
+      ]
+    },
+    {
+      "id": "AMEP-RES-001",
+      "statement": "GPS_DENIED_RESILIENT authority shall require the configured count of dependency-disjoint, safety-credit, ONLINE non-GNSS absolute sources.",
+      "claim_boundary": "Declared dependency model and SIL policy only; source independence is an engineering assumption, not statistical proof.",
+      "tests": [
+        "tests/test_production_hardening.py::test_single_verified_non_gnss_absolute_source_cannot_claim_resilient_mode",
+        "tests/test_production_hardening.py::test_two_verified_dependency_disjoint_sources_enable_resilient_mode",
+        "tests/test_production_hardening.py::test_shared_dependency_prevents_resilient_mode_even_with_two_sources"
+      ]
+    },
+    {
+      "id": "AMEP-EVID-001",
+      "statement": "Replay evidence shall be deterministically serializable and tamper-evident through the published hash-chain contract.",
+      "claim_boundary": "Software tamper evidence only; not a digital signature, trusted clock, or classified audit mechanism.",
+      "tests": [
+        "tests/test_production_hardening.py::test_evidence_log_hash_chain_detects_tamper",
+        "tests/test_production_hardening.py::test_evidence_jsonl_round_trip_is_deterministic",
+        "tests/test_production_hardening.py::test_deterministic_replay_reproduces_solution_and_evidence"
+      ]
+    }
+  ]
+}

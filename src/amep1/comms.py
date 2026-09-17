@@ -11,12 +11,14 @@ class LinkPolicy:
     max_future_skew_s: float = 0.050
 
     def __post_init__(self) -> None:
+        heartbeat_age = float(self.max_heartbeat_age_s)
+        future_skew = float(self.max_future_skew_s)
         if self.priority < 0:
             raise ValueError("priority must be >= 0")
-        if self.max_heartbeat_age_s <= 0:
-            raise ValueError("max_heartbeat_age_s must be > 0")
-        if self.max_future_skew_s < 0:
-            raise ValueError("max_future_skew_s must be >= 0")
+        if not isfinite(heartbeat_age) or heartbeat_age <= 0:
+            raise ValueError("max_heartbeat_age_s must be finite and > 0")
+        if not isfinite(future_skew) or future_skew < 0:
+            raise ValueError("max_future_skew_s must be finite and >= 0")
 
 
 @dataclass

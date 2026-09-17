@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 import numpy as np
 
@@ -18,10 +19,19 @@ class ConstraintSpec:
     def __post_init__(self) -> None:
         if not self.observed_state_indices:
             raise ValueError("constraint must observe at least one state")
+        if any(
+            isinstance(index, bool) or not isinstance(index, int)
+            for index in self.observed_state_indices
+        ):
+            raise ValueError("state indices must be integers")
         if any(index < 0 for index in self.observed_state_indices):
             raise ValueError("state indices must be >= 0")
-        if self.weight <= 0:
-            raise ValueError("constraint weight must be > 0")
+        if len(set(self.observed_state_indices)) != len(self.observed_state_indices):
+            raise ValueError("state indices must not contain duplicates")
+        if not isfinite(float(self.weight)) or self.weight <= 0:
+            raise ValueError("constraint weight must be finite and > 0")
+        if self.gnss and not self.absolute_position:
+            raise ValueError("GNSS constraint must declare absolute_position=True")
 
 
 class ConstraintCoverage:
@@ -31,9 +41,15 @@ class ConstraintCoverage:
     profile uses seven states, but orchestration no longer hardcodes that value.
     This heuristic is deliberately not represented as formal nonlinear
     observability.
+
+    ONLINE and DEGRADED sources may contribute to the local information-rank
+    heuristic. Only ONLINE absolute sources receive navigation-authority credit
+    through the ``has_healthy_*`` flags.
     """
 
     def __init__(self, *, state_dim: int = 7) -> None:
+        if isinstance(state_dim, bool) or not isinstance(state_dim, int):
+            raise ValueError("state_dim must be an integer")
         if state_dim < 1:
             raise ValueError("state_dim must be >= 1")
         self.state_dim = int(state_dim)
@@ -64,26 +80,28 @@ class ConstraintCoverage:
 
     def compute(self, health: dict[str, SensorHealth]) -> CoverageResult:
         diagonal = np.zeros(self.state_dim, dtype=float)
-        healthy: list[str] = []
+        usable: list[str] = []
         absolute: list[str] = []
         has_gnss = False
         has_non_gnss_abs = False
 
         for source, spec in self._specs.items():
-            if health.get(source, SensorHealth.UNKNOWN) not in {
+            source_health = health.get(source, SensorHealth.UNKNOWN)
+            if source_health not in {
                 SensorHealth.ONLINE,
                 SensorHealth.DEGRADED,
             }:
                 continue
-            healthy.append(source)
+            usable.append(source)
             for index in spec.observed_state_indices:
                 diagonal[index] += spec.weight
             if spec.absolute_position:
                 absolute.append(source)
-                if spec.gnss:
-                    has_gnss = True
-                else:
-                    has_non_gnss_abs = True
+                if source_health == SensorHealth.ONLINE:
+                    if spec.gnss:
+                        has_gnss = True
+                    else:
+                        has_non_gnss_abs = True
 
         positive = diagonal[diagonal > 0]
         rank = int(np.count_nonzero(diagonal > 1e-12))
@@ -95,7 +113,7 @@ class ConstraintCoverage:
             state_dim=self.state_dim,
             condition_number=condition_number,
             information_diagonal=tuple(float(value) for value in diagonal),
-            healthy_sources=tuple(sorted(healthy)),
+            healthy_sources=tuple(sorted(usable)),
             active_absolute_sources=tuple(sorted(absolute)),
             has_healthy_gnss=has_gnss,
             has_healthy_non_gnss_absolute=has_non_gnss_abs,

@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from math import isfinite
 
+import numpy as np
+
 from .types import MeasurementResult
 
 
@@ -53,6 +55,14 @@ class MeasurementEnvelope:
         ):
             raise ValueError(f"covariance must have shape {(dimension, dimension)}")
 
+        covariance = np.asarray(self.covariance, dtype=float)
+        if not np.allclose(covariance, covariance.T, rtol=1e-10, atol=1e-12):
+            raise ValueError("covariance must be symmetric")
+        try:
+            np.linalg.cholesky(covariance)
+        except np.linalg.LinAlgError as exc:
+            raise ValueError("covariance must be positive definite") from exc
+
 
 @dataclass(frozen=True)
 class ClockDomain:
@@ -74,11 +84,16 @@ class TimeAlignmentPolicy:
     reject_out_of_order: bool = True
 
     def __post_init__(self) -> None:
-        if self.max_transport_latency_s <= 0:
+        latency = float(self.max_transport_latency_s)
+        age = float(self.max_measurement_age_s)
+        future_skew = float(self.max_future_skew_s)
+        if not all(isfinite(value) for value in (latency, age, future_skew)):
+            raise ValueError("time-alignment policy values must be finite")
+        if latency <= 0:
             raise ValueError("max_transport_latency_s must be > 0")
-        if self.max_measurement_age_s <= 0:
+        if age <= 0:
             raise ValueError("max_measurement_age_s must be > 0")
-        if self.max_future_skew_s < 0:
+        if future_skew < 0:
             raise ValueError("max_future_skew_s must be >= 0")
 
 

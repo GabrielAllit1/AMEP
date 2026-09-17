@@ -6,6 +6,7 @@ from amep1 import (
     IntegrityStatus,
     MeasurementEnvelope,
     NavMode,
+    RuntimePolicy,
     TimeAligner,
     build_reference_health_and_constraints,
 )
@@ -33,6 +34,17 @@ def envelope(
         values=tuple(float(value) for value in values),
         covariance=covariance,
         clock_domain=clock_domain,
+    )
+
+
+def compatibility_runtime(*, covariance=None):
+    health, coverage = build_reference_health_and_constraints()
+    estimator = AMEPFilter() if covariance is None else AMEPFilter(P=covariance)
+    return AMEPRuntime(
+        estimator,
+        health,
+        coverage,
+        runtime_policy=RuntimePolicy.compatibility(),
     )
 
 
@@ -74,8 +86,7 @@ def test_time_alignment_normalizes_clock_domain_and_rejects_out_of_order():
 
 
 def test_unknown_clock_domain_fails_closed_before_fusion():
-    health, coverage = build_reference_health_and_constraints()
-    runtime = AMEPRuntime(AMEPFilter(), health, coverage)
+    runtime = compatibility_runtime()
     result = runtime.ingest_measurement(
         envelope(
             "gnss",
@@ -92,8 +103,7 @@ def test_unknown_clock_domain_fails_closed_before_fusion():
 
 
 def test_rejected_contract_does_not_advance_source_time_watermark():
-    health, coverage = build_reference_health_and_constraints()
-    runtime = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
+    runtime = compatibility_runtime(covariance=np.eye(7))
 
     malformed = envelope(
         "gnss",
@@ -113,8 +123,7 @@ def test_rejected_contract_does_not_advance_source_time_watermark():
 
 
 def test_normalized_measurements_drive_nominal_mode_and_rich_pnt_solution():
-    health, coverage = build_reference_health_and_constraints()
-    runtime = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
+    runtime = compatibility_runtime(covariance=np.eye(7))
 
     assert runtime.ingest_measurement(
         envelope("gnss", "position", 1.00, (0.0, 0.0), 1.0)
@@ -148,8 +157,7 @@ def test_normalized_measurements_drive_nominal_mode_and_rich_pnt_solution():
 
 
 def test_integrity_blocks_navigation_when_constraint_rank_is_insufficient():
-    health, coverage = build_reference_health_and_constraints()
-    runtime = AMEPRuntime(AMEPFilter(), health, coverage)
+    runtime = compatibility_runtime()
     report = runtime.integrity_report(now_s=0.0)
     status = runtime.status(now_s=0.0)
     assert report.status == IntegrityStatus.UNAVAILABLE
@@ -159,8 +167,7 @@ def test_integrity_blocks_navigation_when_constraint_rank_is_insufficient():
 
 
 def test_full_covariance_measurement_contract_is_used_by_runtime():
-    health, coverage = build_reference_health_and_constraints()
-    runtime = AMEPRuntime(AMEPFilter(P=np.eye(7)), health, coverage)
+    runtime = compatibility_runtime(covariance=np.eye(7))
     measurement = MeasurementEnvelope(
         source="gnss",
         kind="position",
