@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+from importlib import metadata
 import json
+from pathlib import Path
+import sys
 from typing import Any, Iterable, Mapping
 
 
@@ -18,6 +21,43 @@ def _canonical_json(value: Mapping[str, JSONValue]) -> str:
         ensure_ascii=False,
         allow_nan=False,
     )
+
+
+def canonical_fingerprint(value: Mapping[str, JSONValue]) -> str:
+    """Return a stable SHA-256 fingerprint for JSON-compatible configuration."""
+    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _distribution_version(name: str) -> str:
+    try:
+        return metadata.version(name)
+    except metadata.PackageNotFoundError:
+        return "not-installed"
+
+
+def software_identity() -> dict[str, JSONValue]:
+    """Fingerprint the executing AMEP package and behavior-critical dependencies.
+
+    The package-tree digest is computed from every ``.py`` file in the installed
+    ``amep1`` package. This binds replay evidence to actual source bytes even when
+    a Git commit identifier is unavailable in the runtime environment.
+    """
+    package_root = Path(__file__).resolve().parent
+    file_hashes: dict[str, JSONValue] = {}
+    for path in sorted(package_root.rglob("*.py")):
+        relative = path.relative_to(package_root).as_posix()
+        file_hashes[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    package_tree_sha256 = canonical_fingerprint({"files": file_hashes})
+    return {
+        "package_tree_sha256": package_tree_sha256,
+        "python": sys.version.split()[0],
+        "distributions": {
+            "amep1": _distribution_version("amep1"),
+            "numpy": _distribution_version("numpy"),
+            "scipy": _distribution_version("scipy"),
+        },
+    }
 
 
 @dataclass(frozen=True)
@@ -50,9 +90,9 @@ class EvidenceVerification:
 class EvidenceLog:
     """Canonical SHA-256 hash chain for replay and assurance artifacts.
 
-    This supplies tamper-evidence and deterministic provenance for software
-    experiments. It is not a cryptographic signature, secure clock, trusted
-    logger, or classified audit mechanism.
+    This supplies deterministic tamper-evidence for software experiments. It is
+    not a digital signature, secure clock, trusted logger, or classified audit
+    mechanism.
     """
 
     GENESIS_HASH = "0" * 64
@@ -62,7 +102,7 @@ class EvidenceLog:
 
     @staticmethod
     def _hash_body(body: Mapping[str, JSONValue]) -> str:
-        return hashlib.sha256(_canonical_json(body).encode("utf-8")).hexdigest()
+        return canonical_fingerprint(body)
 
     def append(
         self,
@@ -110,12 +150,18 @@ class EvidenceLog:
         for expected_sequence, record in enumerate(records):
             count += 1
             if record.sequence != expected_sequence:
-                return EvidenceVerification(False, count, record.sequence, "sequence_mismatch")
+                return EvidenceVerification(
+                    False, count, record.sequence, "sequence_mismatch"
+                )
             if record.previous_hash != previous:
-                return EvidenceVerification(False, count, record.sequence, "previous_hash_mismatch")
+                return EvidenceVerification(
+                    False, count, record.sequence, "previous_hash_mismatch"
+                )
             expected_hash = cls._hash_body(record.body())
             if record.record_hash != expected_hash:
-                return EvidenceVerification(False, count, record.sequence, "record_hash_mismatch")
+                return EvidenceVerification(
+                    False, count, record.sequence, "record_hash_mismatch"
+                )
             previous = record.record_hash
         return EvidenceVerification(True, count)
 
@@ -131,7 +177,11 @@ class EvidenceLog:
                 EvidenceRecord(
                     sequence=int(value["sequence"]),
                     event_type=str(value["event_type"]),
-                    timestamp_s=None if value["timestamp_s"] is None else float(value["timestamp_s"]),
+                    timestamp_s=(
+                        None
+                        if value["timestamp_s"] is None
+                        else float(value["timestamp_s"])
+                    ),
                     payload=dict(value["payload"]),
                     previous_hash=str(value["previous_hash"]),
                     record_hash=str(value["record_hash"]),
