@@ -39,9 +39,9 @@ from .nmea0183 import (
     NMEA0183AdapterConfig,
     NMEA0183StreamDecoder,
     ParsedNMEA0183,
-    parse_sentence as parse_nmea0183_sentence,
-    validate_sentence as validate_nmea0183_sentence,
 )
+from .nmea0183 import parse_sentence as parse_nmea0183_sentence
+from .nmea0183 import validate_sentence as validate_nmea0183_sentence
 from .profile import (
     build_reference_health_and_constraints,
     build_reference_runtime,
