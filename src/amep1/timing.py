@@ -22,12 +22,16 @@ class DeadlineWatchdog:
     """
 
     def __init__(self, *, expected_period_s: float, deadline_s: float) -> None:
-        if expected_period_s <= 0 or deadline_s <= 0:
+        expected_period = float(expected_period_s)
+        deadline = float(deadline_s)
+        if not isfinite(expected_period) or not isfinite(deadline):
+            raise ValueError("period and deadline must be finite")
+        if expected_period <= 0 or deadline <= 0:
             raise ValueError("period and deadline must be > 0")
-        if deadline_s < expected_period_s:
+        if deadline < expected_period:
             raise ValueError("deadline_s must be >= expected_period_s")
-        self.expected_period_s = float(expected_period_s)
-        self.deadline_s = float(deadline_s)
+        self.expected_period_s = expected_period
+        self.deadline_s = deadline
         self.last_t: float | None = None
 
     def observe(self, timestamp_s: float) -> WatchdogResult:
