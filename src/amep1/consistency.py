@@ -28,6 +28,9 @@ class ConsistencyReport:
     conflicts: tuple[SourceConflict, ...]
     worst_nis: float | None
     threshold: float
+    latched: bool = False
+    recovery_consistent_checks: int = 0
+    recovery_required_checks: int = 0
 
     @property
     def consistent(self) -> bool:
@@ -39,14 +42,22 @@ class ConsistencyPolicy:
     probability: float = 0.997
     max_time_separation_s: float = 0.10
     retention_s: float = 2.0
+    recovery_consecutive_consistent_checks: int = 3
 
     def __post_init__(self) -> None:
-        if not 0.5 < self.probability < 1.0:
+        probability = float(self.probability)
+        max_separation = float(self.max_time_separation_s)
+        retention = float(self.retention_s)
+        if not all(isfinite(value) for value in (probability, max_separation, retention)):
+            raise ValueError("consistency policy values must be finite")
+        if not 0.5 < probability < 1.0:
             raise ValueError("probability must be in (0.5, 1.0)")
-        if self.max_time_separation_s < 0:
+        if max_separation < 0:
             raise ValueError("max_time_separation_s must be >= 0")
-        if self.retention_s <= 0:
+        if retention <= 0:
             raise ValueError("retention_s must be > 0")
+        if self.recovery_consecutive_consistent_checks < 1:
+            raise ValueError("recovery_consecutive_consistent_checks must be >= 1")
 
 
 @dataclass(frozen=True)
@@ -67,16 +78,31 @@ class CrossSourceConsistencyMonitor:
     integrity dependencies are compared. Assessment and commit are separate so a
     contradiction is rejected before estimator mutation. Two-source disagreement
     is integrity evidence, not enough information to identify the faulty source.
+
+    A detected contradiction is latched for integrity purposes. The latch clears
+    only after the configured number of consecutive accepted observations each
+    produces at least one dependency-disjoint consistent pair. Measurements may
+    continue to be assessed while the latch is active so recovery evidence can be
+    accumulated without silently restoring navigation authority on the first good
+    sample.
     """
 
     def __init__(self, policy: ConsistencyPolicy | None = None) -> None:
         self.policy = policy or ConsistencyPolicy()
         self._latest: dict[str, _AbsoluteObservation] = {}
-        self._last_report = ConsistencyReport(
+        self._latched_conflicts: tuple[SourceConflict, ...] = ()
+        self._recovery_consistent_checks = 0
+        self._last_report = self._empty_report()
+
+    def _empty_report(self) -> ConsistencyReport:
+        return ConsistencyReport(
             checked_pairs=0,
             conflicts=(),
             worst_nis=None,
             threshold=float(chi2.ppf(self.policy.probability, df=2)),
+            latched=False,
+            recovery_consistent_checks=0,
+            recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
         )
 
     @property
@@ -101,14 +127,32 @@ class CrossSourceConsistencyMonitor:
         descriptor = registry.descriptor(envelope.source)
         threshold = float(chi2.ppf(self.policy.probability, df=2))
         if descriptor is None or not descriptor.absolute_position or not descriptor.safety_credit:
-            return None, ConsistencyReport(0, (), None, threshold)
+            return None, ConsistencyReport(
+                0,
+                (),
+                None,
+                threshold,
+                recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
+            )
         if envelope.kind != "position" or len(envelope.values) != 2:
-            return None, ConsistencyReport(0, (), None, threshold)
+            return None, ConsistencyReport(
+                0,
+                (),
+                None,
+                threshold,
+                recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
+            )
 
         value = np.asarray(envelope.values, dtype=float).reshape(2)
         covariance = np.asarray(envelope.covariance, dtype=float).reshape(2, 2)
         if not np.all(np.isfinite(value)) or not np.all(np.isfinite(covariance)):
-            return None, ConsistencyReport(0, (), None, threshold)
+            return None, ConsistencyReport(
+                0,
+                (),
+                None,
+                threshold,
+                recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
+            )
 
         self._prune(aligned.timestamp_s)
         conflicts: list[SourceConflict] = []
@@ -167,6 +211,7 @@ class CrossSourceConsistencyMonitor:
             conflicts=tuple(conflicts),
             worst_nis=worst,
             threshold=threshold,
+            recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
         )
 
     def assess_position(
@@ -176,13 +221,23 @@ class CrossSourceConsistencyMonitor:
     ) -> ConsistencyReport:
         _, report = self._candidate(aligned, registry)
         if not report.consistent:
-            self._last_report = report
+            self.latch_conflict(report)
         return report
 
     def latch_conflict(self, report: ConsistencyReport) -> None:
         if report.consistent:
             raise ValueError("cannot latch a consistency report without conflicts")
-        self._last_report = report
+        self._latched_conflicts = report.conflicts
+        self._recovery_consistent_checks = 0
+        self._last_report = ConsistencyReport(
+            checked_pairs=report.checked_pairs,
+            conflicts=report.conflicts,
+            worst_nis=report.worst_nis,
+            threshold=report.threshold,
+            latched=True,
+            recovery_consistent_checks=0,
+            recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
+        )
 
     def commit_position(
         self,
@@ -197,7 +252,45 @@ class CrossSourceConsistencyMonitor:
             raise ValueError("cannot commit an inconsistent absolute observation")
         if observation is not None:
             self._latest[observation.source] = observation
-            self._last_report = effective
+
+        if self._latched_conflicts:
+            if effective.checked_pairs > 0:
+                self._recovery_consistent_checks += 1
+            if (
+                self._recovery_consistent_checks
+                >= self.policy.recovery_consecutive_consistent_checks
+            ):
+                self._latched_conflicts = ()
+                self._last_report = ConsistencyReport(
+                    checked_pairs=effective.checked_pairs,
+                    conflicts=(),
+                    worst_nis=effective.worst_nis,
+                    threshold=effective.threshold,
+                    latched=False,
+                    recovery_consistent_checks=self._recovery_consistent_checks,
+                    recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
+                )
+                self._recovery_consistent_checks = 0
+            else:
+                self._last_report = ConsistencyReport(
+                    checked_pairs=effective.checked_pairs,
+                    conflicts=self._latched_conflicts,
+                    worst_nis=self._last_report.worst_nis,
+                    threshold=effective.threshold,
+                    latched=True,
+                    recovery_consistent_checks=self._recovery_consistent_checks,
+                    recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
+                )
+        else:
+            self._last_report = ConsistencyReport(
+                checked_pairs=effective.checked_pairs,
+                conflicts=(),
+                worst_nis=effective.worst_nis,
+                threshold=effective.threshold,
+                latched=False,
+                recovery_consistent_checks=0,
+                recovery_required_checks=self.policy.recovery_consecutive_consistent_checks,
+            )
 
     def observe_position(
         self,
