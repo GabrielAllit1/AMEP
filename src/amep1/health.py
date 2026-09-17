@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 
 from .config import SourcePolicy
 from .enums import SensorHealth
@@ -37,78 +37,106 @@ class SensorHealthManager:
         except KeyError as exc:
             raise KeyError(f"unregistered source: {source}") from exc
 
+    def configuration(self) -> dict[str, dict[str, object]]:
+        return {
+            source: dict(asdict(record.policy))
+            for source, record in sorted(self._records.items())
+        }
+
     def manual_isolate(self, source: str, isolated: bool = True) -> None:
-        rec = self._record(source)
-        rec.manual_isolated = isolated
+        record = self._record(source)
+        record.manual_isolated = isolated
         if isolated:
-            rec.state = SensorHealth.ISOLATED
-            rec.consecutive_probe_accepts = 0
+            record.state = SensorHealth.ISOLATED
+            record.consecutive_probe_accepts = 0
         else:
-            rec.state = SensorHealth.DEGRADED
+            record.state = SensorHealth.DEGRADED
 
     def may_fuse(self, source: str) -> bool:
-        return self._record(source).state not in {SensorHealth.ISOLATED, SensorHealth.STALE}
+        return self._record(source).state not in {
+            SensorHealth.ISOLATED,
+            SensorHealth.STALE,
+        }
 
-    def observe(self, source: str, timestamp_s: float, result: MeasurementResult) -> SensorHealth:
-        rec = self._record(source)
-        if rec.last_seen_s is not None and timestamp_s < rec.last_seen_s:
-            rec.state = SensorHealth.ISOLATED
-            rec.consecutive_probe_accepts = 0
-            return rec.state
-        rec.last_seen_s = timestamp_s
+    def observe(
+        self,
+        source: str,
+        timestamp_s: float,
+        result: MeasurementResult,
+    ) -> SensorHealth:
+        record = self._record(source)
+        if record.last_seen_s is not None and timestamp_s < record.last_seen_s:
+            record.state = SensorHealth.ISOLATED
+            record.consecutive_probe_accepts = 0
+            return record.state
+        record.last_seen_s = timestamp_s
 
-        if rec.manual_isolated:
-            rec.state = SensorHealth.ISOLATED
-            return rec.state
+        if record.manual_isolated:
+            record.state = SensorHealth.ISOLATED
+            return record.state
 
-        rec.recent_accepts.append(result.accepted)
+        record.recent_accepts.append(result.accepted)
 
-        if rec.state == SensorHealth.ISOLATED:
+        if record.state == SensorHealth.ISOLATED:
             if result.accepted:
-                rec.consecutive_probe_accepts += 1
-                if rec.consecutive_probe_accepts >= rec.policy.recovery_consecutive_accepts:
-                    rec.state = SensorHealth.DEGRADED
-                    rec.consecutive_rejections = 0
-                    rec.consecutive_probe_accepts = 0
+                record.consecutive_probe_accepts += 1
+                if (
+                    record.consecutive_probe_accepts
+                    >= record.policy.recovery_consecutive_accepts
+                ):
+                    record.state = SensorHealth.DEGRADED
+                    record.consecutive_rejections = 0
+                    record.consecutive_probe_accepts = 0
             else:
-                rec.consecutive_probe_accepts = 0
-            return rec.state
+                record.consecutive_probe_accepts = 0
+            return record.state
 
         if result.accepted:
-            rec.consecutive_rejections = 0
+            record.consecutive_rejections = 0
         else:
-            rec.consecutive_rejections += 1
-            if rec.consecutive_rejections >= rec.policy.isolate_after_consecutive_rejections:
-                rec.state = SensorHealth.ISOLATED
-                rec.consecutive_probe_accepts = 0
-                return rec.state
+            record.consecutive_rejections += 1
+            if (
+                record.consecutive_rejections
+                >= record.policy.isolate_after_consecutive_rejections
+            ):
+                record.state = SensorHealth.ISOLATED
+                record.consecutive_probe_accepts = 0
+                return record.state
 
-        if len(rec.recent_accepts) >= rec.policy.min_window_samples:
-            rejection_fraction = 1.0 - (sum(rec.recent_accepts) / len(rec.recent_accepts))
-            if rejection_fraction > rec.policy.max_rejection_fraction:
-                rec.state = SensorHealth.DEGRADED
-                return rec.state
+        if len(record.recent_accepts) >= record.policy.min_window_samples:
+            rejection_fraction = 1.0 - (
+                sum(record.recent_accepts) / len(record.recent_accepts)
+            )
+            if rejection_fraction > record.policy.max_rejection_fraction:
+                record.state = SensorHealth.DEGRADED
+                return record.state
 
-        rec.state = SensorHealth.ONLINE if result.accepted else SensorHealth.DEGRADED
-        return rec.state
+        record.state = (
+            SensorHealth.ONLINE if result.accepted else SensorHealth.DEGRADED
+        )
+        return record.state
 
     def refresh(self, now_s: float) -> None:
-        for rec in self._records.values():
-            if rec.manual_isolated or rec.last_seen_s is None:
+        for record in self._records.values():
+            if record.manual_isolated or record.last_seen_s is None:
                 continue
-            if now_s - rec.last_seen_s > rec.policy.max_age_s:
-                rec.state = SensorHealth.STALE
+            if now_s - record.last_seen_s > record.policy.max_age_s:
+                record.state = SensorHealth.STALE
 
     def state(self, source: str) -> SensorHealth:
         return self._record(source).state
 
     def states(self) -> dict[str, SensorHealth]:
-        return {name: rec.state for name, rec in self._records.items()}
+        return {name: record.state for name, record in self._records.items()}
 
     def source_ages(self, now_s: float) -> dict[str, float | None]:
         """Return age-of-data for every registered source in navigation-clock seconds."""
         now = float(now_s)
         return {
-            name: None if rec.last_seen_s is None else max(0.0, now - rec.last_seen_s)
-            for name, rec in self._records.items()
+            name: (
+                None
+                if record.last_seen_s is None
+                else max(0.0, now - record.last_seen_s)
+            )
+            for name, record in self._records.items()
         }
