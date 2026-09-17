@@ -4,32 +4,77 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: amep-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: Python 3.11
-    runs-on: ubuntu-latest
+    name: Windows self-hosted
+    runs-on: [self-hosted, windows, x64, amep]
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
+      - name: Verify self-hosted runtime
+        shell: pwsh
+        run: |
+          Write-Host "Runner: $env:RUNNER_NAME"
+          Write-Host "Machine: $env:COMPUTERNAME"
+          python --version
+          python -c "import sys; assert sys.version_info >= (3, 10), sys.version"
+          python -m pip --version
 
       - name: Install
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e '.[test]'
+          python -m pip install -e '.[test,qa]'
 
       - name: Compile
         run: python -m compileall -q src tests examples
 
-      - name: Test
-        run: pytest
+      - name: Ruff
+        run: python -m ruff check src tests examples
+
+      - name: Type check
+        run: python -m mypy src/amep1
+
+      - name: Static security scan
+        run: python -m bandit -q -r src/amep1
+
+      - name: Runtime dependency audit
+        shell: pwsh
+        run: |
+          python -c "import importlib.metadata as m; print('numpy==' + m.version('numpy')); print('scipy==' + m.version('scipy'))" | Out-File -Encoding ascii .ci-runtime-requirements.txt
+          python -m pip_audit -r .ci-runtime-requirements.txt --strict
+
+      - name: Generate CycloneDX SBOM
+        shell: pwsh
+        run: |
+          cyclonedx-py requirements .ci-runtime-requirements.txt --output-format JSON --output-file sbom.cdx.json
+          if (-not (Test-Path sbom.cdx.json)) { throw 'SBOM generation failed' }
+
+      - name: Test with coverage
+        run: python -m pytest --cov=amep1 --cov-report=term-missing --cov-report=xml --cov-fail-under=75
+
+      - name: Persist assurance artifacts on self-hosted runner
+        if: always()
+        shell: pwsh
+        run: |
+          $runnerRoot = Split-Path -Parent $env:RUNNER_WORKSPACE
+          $artifactRoot = Join-Path $runnerRoot "_artifacts\AMEP\$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Force -Path $artifactRoot | Out-Null
+          foreach ($file in @('coverage.xml', 'sbom.cdx.json')) {
+            if (Test-Path $file) {
+              Copy-Item $file -Destination $artifactRoot -Force
+            }
+          }
+          Write-Host "AMEP assurance artifacts: $artifactRoot"
