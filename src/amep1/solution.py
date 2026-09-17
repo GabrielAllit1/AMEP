@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from .enums import NavMode, SensorHealth
 from .integrity import IntegrityReport, IntegrityStatus
@@ -9,26 +9,32 @@ from .integrity import IntegrityReport, IntegrityStatus
 
 @dataclass(frozen=True)
 class PNTSolution:
-    """Evidence-bounded AMEP navigation output contract.
+    """Evidence-bounded navigation output contract.
 
-    Attitude and validated navigation time are not produced by the current
-    seven-state horizontal estimator, and no validated protection bound exists.
-    Those absences are represented explicitly instead of inferred by consumers.
+    Covariance is self-describing through ``state_schema_id`` and
+    ``covariance_labels``. The containment proxy is reported together with its
+    configured probability when the backend exposes that probability rather than
+    encoding a probability into the field name. Backend-specific maritime
+    quantities remain nullable.
     """
 
     timestamp_s: float | None
     mode: NavMode
+    frame: str
     east_m: float
     north_m: float
     ground_velocity_e_mps: float
     ground_velocity_n_mps: float
-    water_velocity_e_mps: float
-    water_velocity_n_mps: float
-    current_e_mps: float
-    current_n_mps: float
+    water_velocity_e_mps: float | None
+    water_velocity_n_mps: float | None
+    current_e_mps: float | None
+    current_n_mps: float | None
     heading_rad: float
     covariance: tuple[tuple[float, ...], ...]
-    containment_proxy_95_m: float
+    state_schema_id: str
+    covariance_labels: tuple[str, ...]
+    containment_probability: float | None
+    horizontal_containment_proxy_m: float
     horizontal_protection_bound_m: float | None
     protection_bound_validated: bool
     integrity_status: IntegrityStatus

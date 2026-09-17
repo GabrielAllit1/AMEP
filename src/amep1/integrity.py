@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
-from typing import Mapping
 
+from .consistency import ConsistencyReport
 from .enums import SensorHealth
+from .source_registry import SourceRegistry
 from .types import CoverageResult
 
 
@@ -14,6 +16,20 @@ class IntegrityStatus(str, Enum):
     DEGRADED = "DEGRADED"
     UNAVAILABLE = "UNAVAILABLE"
     ALERT = "ALERT"
+
+
+@dataclass(frozen=True)
+class IntegrityPolicy:
+    minimum_navigation_rank: int = 3
+    minimum_resilient_non_gnss_absolute_sources: int = 2
+    require_dependency_model_for_resilient: bool = True
+    block_on_cross_source_conflict: bool = True
+
+    def __post_init__(self) -> None:
+        if self.minimum_navigation_rank < 1:
+            raise ValueError("minimum_navigation_rank must be >= 1")
+        if self.minimum_resilient_non_gnss_absolute_sources < 1:
+            raise ValueError("minimum_resilient_non_gnss_absolute_sources must be >= 1")
 
 
 @dataclass(frozen=True)
@@ -28,20 +44,41 @@ class IntegrityReport:
     horizontal_protection_bound_m: float | None
     protection_bound_validated: bool
     reasons: tuple[str, ...]
+    dependency_model_available: bool = False
+    declared_absolute_failure_domains: tuple[str, ...] = ()
+    declared_non_gnss_absolute_failure_domains: tuple[str, ...] = ()
+    independent_non_gnss_absolute_sources: int = 0
+    unregistered_active_absolute_sources: tuple[str, ...] = ()
+    resilient_navigation_permitted: bool = False
+    cross_source_consistent: bool | None = None
+    cross_source_conflicts: int = 0
 
 
 class IntegrityEngine:
-    """Evidence-bounded integrity assessment for the current AMEP stack.
+    """Evidence-bounded integrity assessment for the AMEP runtime.
 
-    This is intentionally not a certified RAIM/protection-level implementation.
-    It consolidates estimator/health/coverage evidence into one explicit contract
-    and refuses to label the covariance containment proxy as a protection bound.
+    The engine explicitly distinguishes health from independence. Multiple
+    healthy sources that share any declared integrity dependency do not receive
+    multiple units of resilience credit. Only ONLINE absolute sources receive
+    diversity credit; DEGRADED sources may still contribute to the estimator and
+    local coverage heuristic but cannot establish resilient-mode independence.
     """
 
-    def __init__(self, *, minimum_navigation_rank: int = 3) -> None:
-        if minimum_navigation_rank < 1:
-            raise ValueError("minimum_navigation_rank must be >= 1")
-        self.minimum_navigation_rank = int(minimum_navigation_rank)
+    def __init__(
+        self,
+        *,
+        minimum_navigation_rank: int | None = None,
+        policy: IntegrityPolicy | None = None,
+    ) -> None:
+        if policy is not None and minimum_navigation_rank is not None:
+            raise ValueError("provide policy or minimum_navigation_rank, not both")
+        if policy is None:
+            policy = IntegrityPolicy(
+                minimum_navigation_rank=(
+                    3 if minimum_navigation_rank is None else int(minimum_navigation_rank)
+                )
+            )
+        self.policy = policy
 
     def evaluate(
         self,
@@ -51,6 +88,8 @@ class IntegrityEngine:
         sensor_health: Mapping[str, SensorHealth],
         containment_proxy_m: float,
         hard_fault_reason: str | None = None,
+        source_registry: SourceRegistry | None = None,
+        consistency: ConsistencyReport | None = None,
     ) -> IntegrityReport:
         reasons: list[str] = []
         unhealthy = tuple(
@@ -65,42 +104,91 @@ class IntegrityEngine:
             )
         )
 
-        if not isfinite(float(containment_proxy_m)) or containment_proxy_m < 0:
-            reasons.append("invalid_containment_proxy")
-            return IntegrityReport(
-                timestamp_s,
-                IntegrityStatus.ALERT,
-                False,
-                coverage.information_rank,
-                coverage.state_dim,
-                unhealthy,
-                float(containment_proxy_m),
-                None,
-                False,
-                tuple(reasons),
+        active_absolute = coverage.active_absolute_sources
+        creditable_absolute = tuple(
+            source
+            for source in active_absolute
+            if sensor_health.get(source) == SensorHealth.ONLINE
+        )
+        if source_registry is None:
+            dependency_available = False
+            abs_domains: tuple[str, ...] = ()
+            non_gnss_domains: tuple[str, ...] = ()
+            independent_non_gnss = 0
+            unregistered = tuple(active_absolute)
+        else:
+            unregistered = source_registry.unregistered(active_absolute)
+            dependency_available = bool(active_absolute) and not unregistered
+            abs_domains = source_registry.failure_domains(
+                creditable_absolute,
+                absolute_only=True,
+            )
+            non_gnss_domains = source_registry.failure_domains(
+                creditable_absolute,
+                absolute_only=True,
+                non_gnss_only=True,
+            )
+            independent_non_gnss = source_registry.maximum_independent_count(
+                creditable_absolute,
+                absolute_only=True,
+                non_gnss_only=True,
             )
 
-        if hard_fault_reason is not None:
+        full_non_gnss = (
+            coverage.information_rank >= coverage.state_dim
+            and coverage.has_healthy_non_gnss_absolute
+        )
+        resilient_permitted = full_non_gnss and (
+            independent_non_gnss
+            >= self.policy.minimum_resilient_non_gnss_absolute_sources
+        )
+        if self.policy.require_dependency_model_for_resilient and not dependency_available:
+            resilient_permitted = False
+
+        cross_source_consistent = None if consistency is None else consistency.consistent
+        cross_source_conflicts = 0 if consistency is None else len(consistency.conflicts)
+
+        status = IntegrityStatus.MONITORING
+        permitted = True
+
+        if not isfinite(float(containment_proxy_m)) or containment_proxy_m < 0:
+            reasons.append("invalid_containment_proxy")
+            status = IntegrityStatus.ALERT
+            permitted = False
+        elif hard_fault_reason is not None:
             reasons.append(hard_fault_reason)
             status = IntegrityStatus.ALERT
             permitted = False
-        elif coverage.information_rank < self.minimum_navigation_rank:
+        elif (
+            consistency is not None
+            and not consistency.consistent
+            and self.policy.block_on_cross_source_conflict
+        ):
+            reasons.append("independent_absolute_sources_inconsistent")
+            status = IntegrityStatus.ALERT
+            permitted = False
+        elif coverage.information_rank < self.policy.minimum_navigation_rank:
             reasons.append("insufficient_navigation_constraint_rank")
             status = IntegrityStatus.UNAVAILABLE
             permitted = False
         elif unhealthy:
             reasons.append("one_or_more_sources_degraded_or_unavailable")
             status = IntegrityStatus.DEGRADED
-            permitted = True
         else:
             reasons.append("monitoring_without_validated_protection_bound")
-            status = IntegrityStatus.MONITORING
-            permitted = True
 
-        # AMEP-1 v1.0 demonstrated that the covariance-derived radius can be
-        # severely overconfident under correlated common-mode bias. Keep the
-        # protection-bound contract explicitly unavailable until a validated
-        # integrity architecture closes that evidence gap.
+        if full_non_gnss and not resilient_permitted:
+            if not dependency_available:
+                reasons.append("resilience_dependency_model_incomplete")
+            elif (
+                independent_non_gnss
+                < self.policy.minimum_resilient_non_gnss_absolute_sources
+            ):
+                reasons.append("insufficient_dependency_disjoint_non_gnss_absolute_sources")
+
+        if unregistered:
+            reasons.append("active_absolute_source_missing_dependency_descriptor")
+
         return IntegrityReport(
             timestamp_s=timestamp_s,
             status=status,
@@ -112,4 +200,12 @@ class IntegrityEngine:
             horizontal_protection_bound_m=None,
             protection_bound_validated=False,
             reasons=tuple(reasons),
+            dependency_model_available=dependency_available,
+            declared_absolute_failure_domains=abs_domains,
+            declared_non_gnss_absolute_failure_domains=non_gnss_domains,
+            independent_non_gnss_absolute_sources=independent_non_gnss,
+            unregistered_active_absolute_sources=unregistered,
+            resilient_navigation_permitted=resilient_permitted,
+            cross_source_consistent=cross_source_consistent,
+            cross_source_conflicts=cross_source_conflicts,
         )
