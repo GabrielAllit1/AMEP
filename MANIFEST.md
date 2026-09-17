@@ -1,80 +1,82 @@
 # Repository Manifest
 
-This manifest describes the authoritative source, test, example, validation, and project-support files in the normalized AMEP repository after the September 2026 PNT-backbone and production-hardening tranches.
+This manifest maps the authoritative source, tests, examples, validation records, and repository-support files in the current AMEP research implementation.
 
 ## Root
 
 | Path | Function |
 | --- | --- |
-| `README.md` | Mission, architecture, maturity, install/test instructions, integrity boundary, and production-hardening direction. |
+| `README.md` | Mission, architecture, maturity, verification commands, integrity boundary, and remaining evidence gates. |
 | `MANIFEST.md` | This file-by-file repository map. |
-| `pyproject.toml` | Python build metadata, package discovery, dependencies, test extras, and pytest configuration. |
+| `pyproject.toml` | Python build metadata, runtime/test/QA dependencies, package discovery, pytest, Ruff, and mypy configuration. |
 | `.gitignore` | Generated/build/editor exclusions. |
-| `CONTRIBUTING.md` | Engineering workflow and PR quality expectations. |
+| `CONTRIBUTING.md` | Engineering workflow, verification requirements, and change-quality expectations. |
 | `SECURITY.md` | Security/safety reporting guidance and operational-use warning. |
-| `CITATION.cff` | Machine-readable citation metadata for the archived AMEP-1 research release. |
+| `CITATION.cff` | Machine-readable citation metadata for the AMEP-1 research release. |
 
-## `src/amep1/` — importable package
-
-| Path | Function |
-| --- | --- |
-| `src/amep1/__init__.py` | Public package surface for estimator, backend, timing, dependency, integrity, replay, evidence, supervision, solution and profile contracts. |
-| `src/amep1/backend.py` | State-dimension-agnostic `EstimatorBackend`, portable `EstimatorSnapshot`, and optional `DelayedMeasurementBackend`. Backends own accepted measurement kinds, coordinate frames, state layout, dynamics and observation models. |
-| `src/amep1/estimator.py` | Current seven-state maritime EKF backend. Propagates `[E,N,Vw_E,Vw_N,C_E,C_N,psi]`, includes the heading-sensitive Jacobian, NIS gating, Cholesky solves, Joseph covariance update, PSD repair, semantic measurement dispatch, capability declaration and portable snapshots. |
-| `src/amep1/config.py` | Estimator/process-noise/source policy plus `RuntimePolicy`; assured profiles can disable legacy direct measurement updates so normalization/integrity cannot be bypassed. |
-| `src/amep1/math_utils.py` | Angle wrapping, covariance symmetrization, nearest-PSD projection and finite-value validation. |
-| `src/amep1/types.py` | Core typed input/result/status contracts including the current preprocessed horizontal IMU input. |
-| `src/amep1/enums.py` | Navigation mode, sensor health and command-authority enumerations. |
-| `src/amep1/time_alignment.py` | `MeasurementEnvelope`, clock-domain declaration, timestamp uncertainty, source/receive time preservation, latency/age checks, future-skew rejection, out-of-order handling, and two-phase align/commit semantics. |
-| `src/amep1/source_registry.py` | Source roles, primary failure domains, shared integrity dependencies, safety-credit declarations, clock/provenance expectations, dependency-disjoint source counting, and deterministic configuration fingerprinting. |
-| `src/amep1/consistency.py` | Pre-fusion near-synchronous absolute-position consistency checks across same-frame, dependency-disjoint sources. Contradictions can be latched without auto-attributing a culprit. |
-| `src/amep1/health.py` | Source freshness, innovation rejection history, isolation, probe-only recovery, fusion eligibility and age-of-data. |
-| `src/amep1/constraints.py` | Deliberately limited local constraint-coverage/information-rank heuristic; not formal nonlinear observability. |
-| `src/amep1/integrity.py` | Integrity state, navigation permission, dependency-disjoint non-GNSS resilience credit, conflict handling and explicit absence of a validated protection level. |
-| `src/amep1/authority.py` | Integrity-aware navigation-mode supervision and operator/autonomy/safety command-authority policy. |
-| `src/amep1/solution.py` | Portable frame-explicit `PNTSolution` containing covariance, source health/age, integrity state and nullable backend-specific maritime fields. |
-| `src/amep1/replay.py` | Deterministic `(timestamp, sequence)` replay through the online runtime; binds evidence to the source-registry fingerprint. |
-| `src/amep1/evidence.py` | Canonical SHA-256 hash-chained software evidence log with verification and JSONL round-trip. Tamper-evident, not a digital signature or trusted logger. |
-| `src/amep1/comms.py` | Deterministic command/telemetry-link priority and heartbeat freshness selection. |
-| `src/amep1/profile.py` | Reference health/coverage policies, reference source-dependency registry, and an assured reference runtime with legacy measurement bypass disabled. |
-| `src/amep1/runtime.py` | Orchestration façade: time alignment, backend capability checks, source contracts, pre-fusion consistency, semantic backend updates, health, coverage, integrity, mode supervision and PNT output. Runtime no longer constructs seven-state observation matrices. |
-| `src/amep1/timing.py` | Host-SIL deadline watchdog. Does not establish target-hardware WCET or real-time determinism. |
-
-## `tests/` — software contracts
+## `src/amep1/`
 
 | Path | Function |
 | --- | --- |
-| `tests/test_estimator.py` | Published water/current semantics, finite-difference heading Jacobian, preprocessed-IMU contract, timebase bounds, covariance reduction, outlier rejection, measurement models and PSD preservation. |
-| `tests/test_supervision.py` | Isolation/recovery, freshness, degraded/full-rank modes, SAFE_HOLD and probe-only behavior. |
-| `tests/test_operations.py` | Communications failover, watchdog behavior, reference profile contents and runtime hard-fault latching. |
-| `tests/test_pnt_backbone.py` | Clock normalization, timestamp uncertainty, ordering, unknown clocks, rejected-contract watermark safety, full-covariance ingestion, integrity veto, nominal operation and rich PNT output. |
-| `tests/test_production_hardening.py` | Backend portability, assured-path enforcement, primary/shared dependency handling, dependency-disjoint resilience credit, pre-fusion independent-source contradiction handling, registry fingerprints, evidence-log tamper detection and deterministic replay. |
+| `src/amep1/__init__.py` | Public package exports for estimator, backend, timing, dependency, integrity, replay, evidence, supervision, solution, and profile contracts. |
+| `src/amep1/backend.py` | Replaceable `EstimatorBackend`, schema-labeled `EstimatorSnapshot`, and delayed-measurement backend protocol. |
+| `src/amep1/estimator.py` | Current seven-state maritime EKF backend with heading-sensitive propagation Jacobian, NIS gating, Cholesky solves, Joseph covariance update, PSD repair, semantic observation dispatch, and explicit covariance schema. |
+| `src/amep1/config.py` | Estimator/process-noise/source policies plus runtime policy for legacy-update and source-registration enforcement. |
+| `src/amep1/math_utils.py` | Angle wrapping, covariance symmetrization, nearest-PSD projection, and finite-value validation. |
+| `src/amep1/types.py` | Core prediction/result/status contracts including the current preprocessed horizontal IMU input. |
+| `src/amep1/enums.py` | Navigation mode, sensor health, and command-authority enumerations. |
+| `src/amep1/time_alignment.py` | `MeasurementEnvelope`, clock-domain declaration, timestamp uncertainty, source/receive time preservation, latency/age/future-skew checks, out-of-order handling, configuration export, and two-phase align/commit semantics. |
+| `src/amep1/source_registry.py` | Source roles, failure domains, shared dependencies, conservative safety-credit contract, clock/provenance expectations, dependency-disjoint counting, and deterministic registry fingerprint. |
+| `src/amep1/consistency.py` | Pre-fusion same-frame absolute-position consistency checks across dependency-disjoint safety-credit source chains. |
+| `src/amep1/health.py` | Freshness, innovation rejection history, isolation, probe-only recovery, fusion eligibility, source age, and health-policy configuration export. |
+| `src/amep1/constraints.py` | Configurable-state-dimension local constraint-coverage/information-rank heuristic; not formal nonlinear observability. |
+| `src/amep1/integrity.py` | Integrity state, navigation permission, dependency-disjoint non-GNSS resilience credit, contradiction handling, and explicit absence of a validated protection level. |
+| `src/amep1/authority.py` | Integrity-aware navigation-mode supervision. Non-GNSS resilient mode fails conservative when an integrity report is absent. |
+| `src/amep1/solution.py` | Frame/schema-explicit `PNTSolution` with ordered covariance labels, containment probability, health/age, integrity state, and nullable backend-specific maritime quantities. |
+| `src/amep1/replay.py` | Deterministic receive-time replay through the online runtime with separate contract/estimator/fusion accounting and platform-neutral prediction events. |
+| `src/amep1/evidence.py` | Canonical SHA-256 hash-chained evidence records, deterministic configuration fingerprints, software-tree identity, dependency-version identity, verification, and JSONL round-trip. |
+| `src/amep1/comms.py` | Link-priority/freshness support with finite, monotonic, and future-heartbeat rejection. |
+| `src/amep1/profile.py` | Seven-state research health/coverage profile, conservative source registry with zero unverified safety credit, and normalized research reference runtime. |
+| `src/amep1/runtime.py` | Orchestration façade binding time alignment, source contracts, consistency, estimator, health, coverage, integrity, navigation mode, configuration fingerprinting, and PNT output. |
+| `src/amep1/timing.py` | Host-SIL deadline observer with finite/non-monotonic/deadline checks; does not establish target WCET or scheduling determinism. |
+
+## `tests/`
+
+| Path | Function |
+| --- | --- |
+| `tests/test_estimator.py` | Published water/current semantics, finite-difference heading Jacobian, preprocessed-IMU contract, timebase limits, observation models, outlier rejection, and covariance properties. |
+| `tests/test_supervision.py` | Source isolation/recovery, freshness, generic state-dimension coverage, conservative direct-supervisor behavior, nominal GNSS mode, degraded mode, SAFE_HOLD, and probe-only recovery. |
+| `tests/test_operations.py` | Communications failover/timestamp validation, watchdog behavior, reference-profile contents, and runtime prediction-fault latching. |
+| `tests/test_pnt_backbone.py` | Clock normalization, timestamp uncertainty, ordering, unknown clocks, rejected-contract watermark safety, full-covariance normalized ingestion, integrity veto, nominal operation, and schema-explicit PNT output. |
+| `tests/test_production_hardening.py` | Backend portability, normalized-path enforcement, safety-credit prerequisites, shared-dependency handling, resilient-mode permission, pre-fusion contradiction blocking, configuration fingerprints, evidence tamper detection, receive-order replay, and replay acceptance accounting. |
 
 ## `examples/`
 
 | Path | Function |
 | --- | --- |
-| `examples/runtime_example.py` | Minimal synthetic runtime example. Inputs are placeholders, not validated adapters. |
+| `examples/runtime_example.py` | Normalized research integration example using `MeasurementEnvelope -> ingest_measurement()` and the conservative reference runtime. Numeric inputs are illustrative software data, not field evidence. |
 
 ## `docs/`
 
 | Path | Function |
 | --- | --- |
-| `docs/ARCHITECTURE.md` | Core architecture and subsystem contracts. |
-| `docs/GNSS_DENIAL.md` | GNSS-denial engineering objective, current behavior, remaining spoof/common-cause limits and staged validation path. |
-| `docs/PRODUCTION_HARDENING_2026.md` | Current research/standards deep dive, MOSA-style portable architecture, implemented hardening rules and prioritized P0–P5 production gates. |
-| `docs/VALIDATION.md` | Software evidence summary and separation from recorded-data/HIL/field evidence. |
-| `docs/validation/TEST_RESULTS.txt` | Historical pre-normalization validation snapshot. |
-| `docs/validation/PNT_BACKBONE_TEST_RESULTS.txt` | Previous PNT-backbone validation snapshot and no-runner CI limitation. |
+| `docs/ARCHITECTURE.md` | Current runtime architecture and subsystem contracts. |
+| `docs/GNSS_DENIAL.md` | GNSS-denial objective, current integrity/degradation behavior, source-credit boundary, and staged evidence gates. |
+| `docs/PRODUCTION_HARDENING_2026.md` | Engineering rationale, implemented hardening requirements, current architecture, external-review evidence requirements, and P0–P5 remaining gates. |
+| `docs/VALIDATION.md` | Current software-validation status and separation from recorded-data/HIL/field evidence. |
+| `docs/validation/TEST_RESULTS.txt` | Historical pre-normalization software validation snapshot. |
+| `docs/validation/PNT_BACKBONE_TEST_RESULTS.txt` | Previous PNT-backbone software validation snapshot and historical runner limitation. |
 
 ## `.github/workflows/`
 
 | Path | Function |
 | --- | --- |
-| `.github/workflows/ci.yml` | Clean-checkout Python 3.11 install, compile and pytest workflow. Historical runs have failed before runner assignment; zero-step workflow failures are not treated as code-test evidence. |
+| `.github/workflows/ci.yml` | Clean PR checkout on the dedicated Windows AMEP runner; verifies Python, installs test/QA tooling, compiles, lints, type-checks, performs static security and runtime dependency audits, generates a CycloneDX SBOM, runs coverage-gated pytest, and uploads assurance artifacts. |
 
 ## Architectural scope
 
-The current executable reference estimator is maritime. The portable work in this repository is the measurement/time/dependency/integrity/replay/authority contract surrounding it. USV, UUV, UAV and UGV integrations may share those contracts while using different estimator backends, frames, source profiles, observability models and safe-state policies.
+The executable reference estimator is maritime. Portable elements include semantic measurement/time contracts, dependency declarations, configurable state-dimension coverage, estimator backend boundaries, schema-labeled covariance output, integrity/authority behavior, replay, and software evidence.
 
-The hardening tranche does **not** close the archived v1.0 common-mode-bias failure, create certified FDE/RAIM, create a protection level, validate a strapdown INS, validate real sensor/bus adapters, establish target-hardware timing, or provide HIL/controlled-field evidence. Those remain explicit production gates.
+A USV, UUV, UAV, UGV, or other integration must provide its own estimator dynamics where appropriate, state schema, prediction-input contract, frames/datums, source profile, dependency analysis, safety-credit decisions, constraint/observability model, timing profile, and safe-state behavior.
+
+The current repository does **not** establish certified FDE/RAIM, a validated protection level, a production strapdown INS, real sensor/bus validation, target-hardware real-time performance, HIL qualification, or controlled-field/water evidence. Those remain explicit production evidence gates.
