@@ -11,13 +11,28 @@ from .consistency import (
 from .constraints import ConstraintCoverage, ConstraintSpec
 from .enums import AuthoritySource, NavMode, SensorHealth
 from .estimator import AMEPFilter, TimebaseError
-from .evidence import EvidenceLog, EvidenceRecord, EvidenceVerification
+from .evidence import (
+    EvidenceLog,
+    EvidenceRecord,
+    EvidenceVerification,
+    canonical_fingerprint,
+    software_identity,
+)
 from .health import SensorHealthManager
 from .integrity import IntegrityEngine, IntegrityPolicy, IntegrityReport, IntegrityStatus
 from .profile import (
     build_reference_health_and_constraints,
     build_reference_runtime,
     build_reference_source_registry,
+    build_research_reference_runtime,
+    build_research_reference_source_registry,
+)
+from .replay import (
+    DeterministicReplay,
+    ReplayIMUEvent,
+    ReplayMeasurementEvent,
+    ReplayPredictionEvent,
+    ReplayResult,
 )
 from .runtime import AMEPRuntime
 from .solution import PNTSolution
@@ -32,8 +47,13 @@ from .time_alignment import (
     TimeAlignmentResult,
 )
 from .timing import DeadlineWatchdog, WatchdogResult
-from .types import AuthorityDecision, CoverageResult, HorizontalIMUInput, MeasurementResult, NavigationStatus
-from .replay import DeterministicReplay, ReplayIMUEvent, ReplayMeasurementEvent, ReplayResult
+from .types import (
+    AuthorityDecision,
+    CoverageResult,
+    HorizontalIMUInput,
+    MeasurementResult,
+    NavigationStatus,
+)
 
 __all__ = [
     "AMEPFilter",
@@ -75,6 +95,7 @@ __all__ = [
     "ProcessNoiseConfig",
     "ReplayIMUEvent",
     "ReplayMeasurementEvent",
+    "ReplayPredictionEvent",
     "ReplayResult",
     "RuntimePolicy",
     "SensorHealth",
@@ -92,4 +113,8 @@ __all__ = [
     "build_reference_health_and_constraints",
     "build_reference_runtime",
     "build_reference_source_registry",
+    "build_research_reference_runtime",
+    "build_research_reference_source_registry",
+    "canonical_fingerprint",
+    "software_identity",
 ]
