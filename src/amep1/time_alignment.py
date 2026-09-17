@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import Mapping
 
@@ -9,12 +9,7 @@ from .types import MeasurementResult
 
 @dataclass(frozen=True)
 class MeasurementEnvelope:
-    """Transport-neutral sensor measurement contract before estimator fusion.
-
-    Timestamps are explicit so integrations can preserve source time, receive time,
-    clock-domain provenance, transport latency, and timestamp uncertainty instead
-    of collapsing all measurements onto callback arrival time.
-    """
+    """Transport-neutral sensor measurement contract before estimator fusion."""
 
     source: str
     kind: str
@@ -43,18 +38,20 @@ class MeasurementEnvelope:
             float(self.source_timestamp_s),
             float(self.receive_timestamp_s),
             float(self.timestamp_uncertainty_s),
-            *(float(v) for v in self.values),
-            *(float(v) for row in self.covariance for v in row),
+            *(float(value) for value in self.values),
+            *(float(value) for row in self.covariance for value in row),
         )
-        if not all(isfinite(v) for v in scalars):
+        if not all(isfinite(value) for value in scalars):
             raise ValueError("measurement envelope contains non-finite numeric data")
         if self.timestamp_uncertainty_s < 0:
             raise ValueError("timestamp_uncertainty_s must be >= 0")
-        n = len(self.values)
-        if n == 0:
+        dimension = len(self.values)
+        if dimension == 0:
             raise ValueError("values must be non-empty")
-        if len(self.covariance) != n or any(len(row) != n for row in self.covariance):
-            raise ValueError(f"covariance must have shape {(n, n)}")
+        if len(self.covariance) != dimension or any(
+            len(row) != dimension for row in self.covariance
+        ):
+            raise ValueError(f"covariance must have shape {(dimension, dimension)}")
 
 
 @dataclass(frozen=True)
@@ -112,12 +109,9 @@ class IngestResult:
 class TimeAligner:
     """Normalize sensor timestamps into the navigation clock domain.
 
-    This initial implementation deliberately rejects delayed/out-of-order samples
-    that the current real-time EKF cannot rewind for. A future fixed-lag smoother
-    or delayed-state update can relax that policy without changing the envelope.
-
-    `align(..., commit=False)` provides a two-phase path for runtimes that must
-    finish frame/kind validation before advancing a source ordering watermark.
+    The real-time estimator rejects delayed/out-of-order samples it cannot rewind.
+    ``align(..., commit=False)`` supports two-phase validation so downstream
+    contract failures cannot advance a source ordering watermark.
     """
 
     def __init__(self, policy: TimeAlignmentPolicy | None = None) -> None:
@@ -136,8 +130,25 @@ class TimeAligner:
             raise ValueError("clock-domain name must be non-empty")
         self._domains[name] = ClockDomain(offset_to_navigation_s, uncertainty_s)
 
+    def configuration(self) -> dict[str, object]:
+        return {
+            "policy": dict(asdict(self.policy)),
+            "clock_domains": {
+                name: dict(asdict(domain))
+                for name, domain in sorted(self._domains.items())
+            },
+        }
+
+    def navigation_timestamp(self, envelope: MeasurementEnvelope) -> float:
+        """Return normalized source time without mutating ordering state."""
+        envelope.validate()
+        domain = self._domains.get(envelope.clock_domain)
+        if domain is None:
+            raise KeyError(f"unknown clock domain: {envelope.clock_domain}")
+        return float(envelope.source_timestamp_s + domain.offset_to_navigation_s)
+
     def commit(self, measurement: AlignedMeasurement) -> None:
-        """Advance a source ordering watermark after downstream contract validation."""
+        """Advance a source ordering watermark after downstream validation."""
         source = measurement.envelope.source
         last = self._last_timestamp_by_source.get(source)
         if last is None or measurement.timestamp_s >= last:
