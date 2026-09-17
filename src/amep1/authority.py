@@ -12,8 +12,14 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class NavigationPolicy:
-    full_rank: int = 7
+    full_rank: int | None = None
     degraded_rank: int = 3
+
+    def __post_init__(self) -> None:
+        if self.full_rank is not None and self.full_rank < 1:
+            raise ValueError("full_rank must be >= 1 when provided")
+        if self.degraded_rank < 1:
+            raise ValueError("degraded_rank must be >= 1")
 
 
 class NavigationSupervisor:
@@ -38,17 +44,28 @@ class NavigationSupervisor:
             self.reason = f"integrity_blocked:{detail}"
             return self.mode
 
+        required_full_rank = (
+            coverage.state_dim if self.policy.full_rank is None else self.policy.full_rank
+        )
         rank = coverage.information_rank
-        if rank >= self.policy.full_rank and coverage.has_healthy_gnss:
+
+        if rank >= required_full_rank and coverage.has_healthy_gnss:
             self.mode = NavMode.NOMINAL
             self.reason = "full_local_constraint_coverage_with_healthy_gnss"
-        elif rank >= self.policy.full_rank and coverage.has_healthy_non_gnss_absolute:
-            if integrity is not None and not integrity.resilient_navigation_permitted:
+        elif rank >= required_full_rank and coverage.has_healthy_non_gnss_absolute:
+            if integrity is None:
                 self.mode = NavMode.DEGRADED_DEAD_RECKONING
-                self.reason = "full_non_gnss_coverage_without_sufficient_integrity_diversity"
+                self.reason = "non_gnss_full_coverage_without_integrity_evidence"
+            elif not integrity.resilient_navigation_permitted:
+                self.mode = NavMode.DEGRADED_DEAD_RECKONING
+                self.reason = (
+                    "full_non_gnss_coverage_without_sufficient_integrity_diversity"
+                )
             else:
                 self.mode = NavMode.GPS_DENIED_RESILIENT
-                self.reason = "full_local_constraint_coverage_with_integrity_supported_non_gnss_aiding"
+                self.reason = (
+                    "full_local_constraint_coverage_with_integrity_supported_non_gnss_aiding"
+                )
         elif rank >= self.policy.degraded_rank:
             self.mode = NavMode.DEGRADED_DEAD_RECKONING
             self.reason = "partial_constraint_coverage"
